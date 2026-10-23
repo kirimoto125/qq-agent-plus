@@ -141,6 +141,9 @@
         <button class="tab" data-icon="sliders" data-tab="control" data-page-node-id="qcontrolnav"><span class="tab-label"><b>控制</b><i>更新与运行开关</i></span></button>
         <button class="tab" data-icon="database" data-tab="memory" data-group-start data-page-node-id="vXS9OY6wG4MkJlzQ2aLADZ"><span class="tab-label"><b>会话记忆</b><i>每条会话记了什么</i></span></button>
         <button class="tab" data-icon="users" data-tab="people-memory" data-page-node-id="qpeoplememorynav"><span class="tab-label"><b>人物记忆</b><i>群友的长期画像</i></span></button>
+        <!-- 小本子：她自己记的流水账（跟谁聊过什么、自己发过哪条说说）。
+             与「人物记忆」并列但不同层：那边是提炼出的印象，这边是可检索的事实。 -->
+        <button class="tab" data-icon="database" data-tab="notebook"><span class="tab-label"><b>小本子</b><i>聊过什么、发过什么</i></span></button>
         <button class="tab" data-icon="idcard" data-tab="identity" data-feature-nav="identity"><span class="tab-label"><b>人物印象</b><i>印象与关系档案</i></span></button>
         <button class="tab" data-icon="userplus" data-tab="friends" data-feature-nav="auto-friend"><span class="tab-label"><b>好友管理</b><i>好友申请与派发</i></span></button>
         <button class="tab" data-icon="activity" data-tab="assets" data-group-start data-page-node-id="qassetobserve"><span class="tab-label"><b>观测</b><i>素材与实验状态</i></span></button>
@@ -280,6 +283,30 @@
       </div>
     </section>
 
+    <!-- 小本子：按人/按会话的流水记录，只读 + 删除 + 导出（写入只走模型工具与会话收尾） -->
+    <section id="view-notebook" class="view">
+      <aside id="notebook-list" class="list-pane">
+        <div class="list-head muted">小本子 <span id="notebook-count"></span></div>
+        <div class="archive-filter">
+          <input type="text" id="notebook-search" placeholder="搜内容 / 人名" />
+          <select id="notebook-kind" aria-label="筛选记录类型">
+            <option value="">全部</option>
+            <option value="memo">记事</option>
+            <option value="chat">流水</option>
+            <option value="self_post">说说</option>
+            <option value="self_said">自己的话</option>
+          </select>
+        </div>
+        <div class="archive-filter">
+          <button class="btn btn-small" type="button" id="notebook-export">导出整本 JSON</button>
+        </div>
+        <div id="notebook-items"></div>
+      </aside>
+      <div id="notebook-detail" class="detail-pane">
+        <div class="empty-hint">← 选择左边一条记录查看</div>
+      </div>
+    </section>
+
     <!-- 正式功能：固定随服务启动，不再由实验功能开关控制 -->
     <section id="view-identity" class="view">
       <div id="identity-page" class="asset-pane"></div>
@@ -409,6 +436,7 @@
   <script type="module" src="/pages/sessions.js"></script>
   <script type="module" src="/pages/chat.js"></script>
   <script type="module" src="/pages/memory.js"></script>
+  <script type="module" src="/pages/notebook.js"></script>
     <script type="module" src="/pages/plugins.js"></script>
   <script type="module" src="/pages/persona-per-chat.js"></script>
   <script type="module" src="/pages/persona.js"></script>

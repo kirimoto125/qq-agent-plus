@@ -44,6 +44,7 @@ import {
   renderIdentityFeaturePageImpl, renderIncidentFeaturePageImpl
 } from './pages/features.js';
 import { loadMemoryView, renderMemoryList } from './pages/memory.js';
+import { loadNotebookView } from './pages/notebook.js';
 import { loadPluginsPage } from './pages/plugins.js';
 import { renderExperimentalSettingsSectionImpl } from './pages/moments.js';
 import { loadSessionDetail, loadSessions } from './pages/sessions.js';
@@ -277,6 +278,7 @@ function switchTab(name) {
   if (name === 'sessions') loadSessions();
   if (name === 'chats') loadChats();
   if (name === 'memory') loadMemoryView();
+  if (name === 'notebook') loadNotebookView();
   if (name === 'identity') loadIdentityFeaturePage();
   if (name === 'friends') loadFriendFeaturePage();
   if (name === 'slang') loadSlangFeaturePage();
