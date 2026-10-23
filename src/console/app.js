@@ -26,6 +26,7 @@ import { StickerManager } from '../onebot/sticker-manager.js';
 import { SendQueue } from '../onebot/sender.js';
 import { SessionRegistry, personaLabelOfPrompt } from '../core/sessions.js';
 import { Orchestrator } from '../core/orchestrator.js';
+import { Notebook } from '../memory/notebook.js';
 import { DailyMomentsManager } from '../features/daily-moments.js';
 import { QzoneInteractionManager } from '../features/qzone-interactions.js';
 import { GroupDigestManager } from '../features/group-digest.js';
@@ -532,6 +533,10 @@ export function createApp({
     synchronous: cfg.store?.sqliteSynchronous   // FULL（默认）/ NORMAL，Issue #45
   });   // 0 = 不限
   const memory = new MemoryStore();
+  // 小本子：独立 SQLite（data/notebook.sqlite）。启动时做一次保留期回收，
+  // 之后随写入自然增长 —— 不另设定时器，避免为一张小表加一个常驻任务。
+  const notebook = new Notebook();
+  try { notebook.prune(); } catch (error) { log('[notebook] 启动回收失败:', error?.message ?? error); }
   const sessions = new SessionRegistry(cfg.store?.keepSessionFiles ?? 0, {
     persistIntervalMs: cfg.store?.sessionPersistMs
   });   // 0 = 不限
@@ -624,6 +629,7 @@ export function createApp({
   const orchestrator = new Orchestrator({
     store,
     memory,
+    notebook,
     stickers,
     sender,
     sessions,
@@ -3050,6 +3056,34 @@ export function createApp({
     files.sort((a, b) => b.updatedAt - a.updatedAt);
     return json(res, 200, { files, consolidating: [...busy] });
   });
+  // ── 小本子（notebook）──
+  // 控制台只提供"看"和"删"：这是她自己记的东西，写入路径只留模型工具与说说自动同步，
+  // 管理端再开一个写入口会让同一份记忆出现两个口径。
+  router.add('GET', '/api/notebook', async (req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    const kinds = String(url.searchParams.get('kind') || '').split(',').map((s) => s.trim()).filter(Boolean);
+    try {
+      const notes = notebook.store.query({
+        kinds: kinds.length ? kinds : null,
+        chatKey: String(url.searchParams.get('chatKey') || ''),
+        personId: String(url.searchParams.get('personId') || ''),
+        q: String(url.searchParams.get('q') || ''),
+        limit: Number(url.searchParams.get('limit')) || 50
+      });
+      return json(res, 200, { notes, stats: notebook.stats() });
+    } catch (error) {
+      return json(res, 500, { error: String(error?.message ?? error) });
+    }
+  });
+  router.add('GET', '/api/notebook/export', async (req, res) => {
+    // 换记忆内核 / 迁移用：整本导出，不带任何运行时状态。
+    return json(res, 200, { exportedAt: Date.now(), notes: notebook.exportAll() });
+  });
+  router.add('DELETE', /^\/api\/notebook\/(\d+)$/, async (req, res, params) => {
+    const removed = notebook.store.deleteById(Number(params[1]));
+    return json(res, removed ? 200 : 404, removed ? { ok: true } : { error: '没有这条记录' });
+  });
+
   router.add('POST', '/api/memory-files/consolidate', async (req, res) => {
     try {
       const body = await readBody(req).catch(() => ({}));

@@ -12,6 +12,7 @@ export const EXPERIMENTAL_READ_ONLY_TOOLS = new Set([
   'get_active_members',
   'memory_query',
   'person_memory_lookup',
+  'notebook_search',        // 小本子是本地只读查询：与 memory_query 同类，可并发
   'web_search',
   'web_fetch',
   'dice',         // 纯计算、无 IO 与副作用，可并行
@@ -55,6 +56,7 @@ export const EXPERIMENTAL_SAME_ROUND_ACTION_TOOLS = new Set([
   'schedule_wake',
   'memory_append',
   'memory_remove',
+  'notebook_write',         // 本地持久化写入：与 memory_append 同类，可与 finish 同轮
   'collect_sticker',
   'sticker_note',
   'report_feedback',

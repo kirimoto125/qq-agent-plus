@@ -169,7 +169,7 @@ function quoteAndAt(cardFirst = false) {
   ].join('\n');
 }
 
-function memoryRules(identityPilotAvailable = false, friendProposalAvailable = false) {
+function memoryRules(identityPilotAvailable = false, friendProposalAvailable = false, notebookAvailable = false) {
   const lines = [
     '【记忆与会话交接】',
     '- memory_append 只用来记录"对某位群友的长期印象"（他的说话风格、爱玩的梗、雷点、身份关系等稳定信息）；这些内容下次运行会自动出现在【记忆】里。',
@@ -191,6 +191,12 @@ function memoryRules(identityPilotAvailable = false, friendProposalAvailable = f
     lines.push(
       '- 你可以自行判断是否主动交朋友：如果基于真实互动对某个人产生了持续兴趣、已经长期频繁交流，或单纯聊得来，可以不等任何人要求，偶尔调用 friend_request_propose 向管理员提交好友候选。',
       '- 好友候选不是好友申请。提交后不要告诉对方“已经加了”，不要催管理员，也不要为了完成任务而凑候选；管理员拥有最终决定权。'
+    );
+  }
+  if (notebookAvailable) {
+    lines.push(
+      '- 【小本子】是你自己记的流水账（跟谁聊过什么、答应过谁什么、自己发过哪条说说）。他让你记住、你答应了什么、或聊到值得留到以后的事，就用 notebook_write 记一条；想确认以前聊过什么、答应过什么，先用 notebook_search 翻，别凭空猜、也别反过来问他"我们是不是聊过"。',
+      '- 小本子里的东西可以自然提起，但不要逐条念、不要当成功劳簿；跨会话的内容只可意会，不得说出"在别的群/私聊里"这种来源。'
     );
   }
   return lines.join('\n');
@@ -565,6 +571,8 @@ export function buildSystemPrompt({
   selfNickname = '',
   identityPilotAvailable = false,
   friendProposalAvailable = false,
+  // 小本子是否可用：关掉时连规则带提示词块一起不给（与工具表同判）
+  notebookAvailable = false,
   stickerEntries = null,
   gameContext = '',
   // 平台能力门控：orchestrator 传**本次会话**的平台配置与 chatKey（按群覆盖要和工具表同判），
@@ -615,7 +623,7 @@ export function buildSystemPrompt({
     '',
     quoteAndAt(cardFirst),
     '',
-    memoryRules(identityPilotAvailable, friendProposalAvailable),
+    memoryRules(identityPilotAvailable, friendProposalAvailable, notebookAvailable),
     '',
     stickerRules(grounded, cardFirst),
     '',
@@ -1082,6 +1090,14 @@ export function buildUserPrompt(ctx) {
   }
   const memText = ctx.memory.formatForPrompt(ctx.chatKey, { userIds: [...relevantUserIds] });
   if (memText) parts.push(`【记忆】\n${memText}`);
+
+  // 小本子（2026-10-23）：与【记忆】同一批相关人，外加本会话最近流水与自己最近的说说。
+  // 放在【记忆】之后：【记忆】是"他是什么样的人"，小本子是"我们之间发生过什么"。
+  // 关掉/不可用时 formatForPrompt 自己返回 ''，这里不再判一次开关。
+  const noteText = typeof ctx.notebook?.formatForPrompt === 'function'
+    ? ctx.notebook.formatForPrompt(ctx.chatKey, { personIds: [...relevantUserIds], now })
+    : '';
+  if (noteText) parts.push(noteText);
 
   // 成员备注：不再单独成段——备注名已经直接替换了消息里的显示名
   // （formatEntry/triggerLabels 都优先用备注），单独列一遍是重复信息。

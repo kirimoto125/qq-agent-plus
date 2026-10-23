@@ -2281,6 +2281,72 @@ export function buildToolDefs() {
       }
     },
     {
+      name: 'notebook_write',
+      description: '往自己的小本子上记一条值得长期记住的事：群友让你记住的、你答应过的事、关于某人的稳定事实（考试/生日/忌口/约定）。只记值得留到以后的，不要把每句话都抄下来。',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: '要记住的内容：谁、什么事、什么时候，一句话说清' },
+          userId: { type: ['integer', 'string'], description: '可选：关于哪个 QQ 号；不传就记在当前会话上' },
+          kind: { type: 'string', enum: ['memo', 'self_said'], description: 'memo=记事（默认）；self_said=记下自己许下的承诺' }
+        },
+        required: ['text']
+      },
+      async execute(ctx, args) {
+        if (!ctx.notebook) return err('小本子当前不可用');
+        const text = String(args.text ?? '').trim();
+        if (!text) return err('text 不能为空');
+        // QQ 号归一化与 person_memory_lookup 同口径：模型常把 '#123' 连 # 一起传进来
+        const userId = normalizeMid(args.userId ?? '') || String(ctx.triggerEntries?.[0]?.senderId || '');
+        if (userId && !/^\d{1,15}$/.test(userId)) {
+          return err(`userId 必须是数字 QQ 号（收到：${JSON.stringify(args.userId)}）。`);
+        }
+        const personName = (ctx.triggerEntries || [])
+          .find((m) => String(m.senderId) === userId)?.senderName || '';
+        const result = ctx.notebook.remember({
+          chatKey: ctx.chatKey,
+          personId: userId,
+          personName,
+          text,
+          kind: args.kind === 'self_said' ? 'self_said' : 'memo',
+          source: 'model'
+        });
+        if (!result) return err('这条没能记进小本子（内容为空或格式不对）');
+        return ok({
+          saved: result.inserted,
+          id: result.id,
+          note: result.inserted ? '已记在小本子上。' : '这条之前记过，不重复记。'
+        });
+      }
+    },
+    {
+      name: 'notebook_search',
+      description: '翻自己的小本子：查以前跟某个人聊过什么、答应过什么、自己发过什么说说。只返回当前会话可见的记录，不会拿到别的群或私聊的原文。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '可选：关键词（人名、话题、事情）' },
+          userId: { type: ['integer', 'string'], description: '可选：只看某个 QQ 号' },
+          days: { type: 'integer', description: '可选：只看最近多少天，默认 30；传 0 表示不限' },
+          limit: { type: 'integer', description: '最多返回几条，默认 10' }
+        }
+      },
+      async execute(ctx, args) {
+        if (!ctx.notebook) return err('小本子当前不可用');
+        const userId = normalizeMid(args.userId ?? '');
+        if (userId && !/^\d{1,15}$/.test(userId)) {
+          return err(`userId 必须是数字 QQ 号（收到：${JSON.stringify(args.userId)}）。`);
+        }
+        return ok(ctx.notebook.search({
+          query: String(args.query ?? ''),
+          personId: userId,
+          chatKey: ctx.chatKey,
+          days: args.days === 0 ? 0 : (Number(args.days) || 30),
+          limit: Number(args.limit) || 10
+        }));
+      }
+    },
+    {
       name: 'friend_request_propose',
       feature: 'friendProposal',
       description: '由你自主判断是否把当前聊天对象或群成员列为“想主动添加好友”的候选，并请求管理员审批。不需要等用户或管理员要求；仅在你确实持续感兴趣、长期聊得频繁，或真心想以后继续互怼时偶尔触发。这不会直接发送好友申请，也不能替管理员批准。',

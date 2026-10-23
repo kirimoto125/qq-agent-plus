@@ -706,7 +706,20 @@ export const DEFAULT_CONFIG = {
     provider: '',                         // 专用模型所属提供商 id（useChatModel=false 时生效）
     model: '',                            // 专用模型 id（useChatModel=false 时生效）
     // 记忆可见性（#13）：默认与历史行为逐字一致（global + 不隐藏），切换必须显式操作
-    visibility: { mode: 'global', hidePrivateInGroup: false }
+    visibility: { mode: 'global', hidePrivateInGroup: false },
+    // 小本子：按人 / 按会话的流水记事（见 src/memory/notebook.js）。
+    // 与上面两个开关独立：关掉只停用这一块，既有印象与交接照常。
+    // 上限都是"注入侧"的预算，不是存储上限；坏值在 notebookConfig() 里夹回安全区。
+    notebook: {
+      enabled: true,
+      perPerson: 2,            // 【小本子】里每人最多带几条记事
+      recentChat: 3,           // 本会话最近几条流水
+      selfPosts: 2,            // 自己最近几条说说
+      promptMaxChars: 1200,    // 整块字符上限（省 Token 模式会再收紧）
+      retentionDays: 365,
+      maxRows: 20000,
+      selfPostSync: true       // 读 daily-moments.json 同步"已发布"的说说（按 tid 幂等）
+    }
   },
   // 省 Token 模式：只给"可控项"夹上限（上下文档位条数、单次运行轮数与预算、
   // 交接/印象注入字符数、提示词里的表情清单条数），不改写上面那些用户填的值。

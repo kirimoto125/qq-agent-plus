@@ -432,10 +432,14 @@ export class Orchestrator {
     random = Math.random,
     getIdentityPilot = null,
     getIncidentPilot = null,
-    getPlugins = null
+    getPlugins = null,
+    // 小本子（按人/按会话的流水记忆）。可选：不传时整块功能停用，
+    // 与 memory/stickers 不同，它不影响聊天主流程，所以允许为 null。
+    notebook = null
   }) {
     this.store = store;
     this.memory = memory;
+    this.notebook = notebook;
     this.stickers = stickers;
     this.sender = sender;
     this.sessions = sessions;
@@ -1523,8 +1527,41 @@ export class Orchestrator {
     this.#maybeConsolidateMemory(chatKey);
   }
 
+  /**
+   * 小本子：把这次会话落成一条流水。
+   * 与会话交接解耦（交接可以被关掉，小本子照样记账）；用的是已经产出的 handoff 草稿，
+   * 不再额外叫一次模型。失败只记日志，绝不影响消息发送与会话收口。
+   */
+  #recordNotebookEntry(session, { chatKey, triggerEntries }) {
+    if (!this.notebook || typeof this.notebook.recordSession !== 'function') return;
+    if (!Array.isArray(session?.sent) || session.sent.length === 0) return;
+    try {
+      const draft = session.handoffDraft || {};
+      const fallbackIncoming = (triggerEntries || []).slice(-3)
+        .map((m) => `${m.senderName || m.senderId || '群友'}：${String(m.text || '').replace(/\s+/g, ' ').trim()}`)
+        .filter((line) => !line.endsWith('：'))
+        .join('；');
+      const participants = handoffParticipantIds(triggerEntries).map((id) => ({
+        id,
+        name: (triggerEntries || []).find((m) => String(m.senderId) === id)?.senderName || ''
+      }));
+      this.notebook.recordSession({
+        chatKey,
+        sessionId: session.id,
+        topic: draft.topic || '',
+        summary: draft.summary || fallbackIncoming,
+        reply: lastSentText(session),
+        participants
+      });
+    } catch (error) {
+      log.warn('[notebook] 记录会话流水失败:', error?.message ?? error);
+    }
+  }
+
   #commitSessionHandoff(session, { chatKey, triggerEntries }) {
     const cfg = getConfig();
+    // 小本子先记：它不依赖 handoff 是否开启，也不该因为交接关闭而整段丢失。
+    this.#recordNotebookEntry(session, { chatKey, triggerEntries });
     if (cfg.memory?.handoffEnabled === false || typeof this.memory?.setHandoff !== 'function') return null;
 
     let draft = session.handoffDraft;
@@ -1902,6 +1939,9 @@ export class Orchestrator {
     const selfWakeEnabled = cfg.proactive?.selfWakeEnabled !== false;
     // 图片生成按张计费：没开/没配就不注入工具，否则模型会去调一个必然失败的画图工具
     const imageGenEnabled = imageGenAvailable(cfg);
+    // 小本子：实例与开关都在才算可用。关掉时连工具带提示词规则一起撤 ——
+    // 否则模型会反复调一个必然报错的工具（与 send_voice/remind 同一口径）。
+    const notebookAvailable = Boolean(this.notebook) && cfg.memory?.notebook?.enabled !== false;
     // 每轮现建一份：工具描述里有随配置变化的文案（例如 get_message_images 会写"抽 4 帧"或
     // "视频画面看不到"）。构造函数里建一次的话，控制台改完设置（不重启）后提示词已经变了、
     // 工具描述还是旧的，模型会收到互相矛盾的两段（2026-10-17 审查 P2）。
@@ -1925,6 +1965,7 @@ export class Orchestrator {
       if (cfg.reminders?.enabled === false && d.name === 'remind') return false;
       if (!searchEnabled && (d.name === 'web_search' || d.name === 'web_fetch')) return false;
       if (!selfWakeEnabled && d.name === 'schedule_wake') return false;
+      if (!notebookAvailable && (d.name === 'notebook_write' || d.name === 'notebook_search')) return false;
       // 群游戏引擎关掉：group_game 工具一并摘掉 —— 提示词侧（prompt.js 玩法与工具箱）
       // 只在开启时教"主持小游戏"，工具表却恒在，模型仍会去调一个必然报错的工具
       //（group-game.js 对 enabled=false 直接拒），白花一轮（2026-10-10 审查 D3）。
@@ -1960,6 +2001,7 @@ export class Orchestrator {
       gameContext: this.getGames?.()?.summaryFor(chatKey) || '',
       identityPilotAvailable: identityAvailable,
       friendProposalAvailable,
+      notebookAvailable,
       stickerEntries,
       // 平台能力的"教不教"必须与上面工具表的"给不给"同判（含按群覆盖）：同一个 chatKey。
       platform: cfg.platform,
@@ -2021,6 +2063,7 @@ export class Orchestrator {
       triggerEntries,
       store: this.store,
       memory: this.memory,
+      notebook: this.notebook,
       stickerEntries,
       slangContext,
       incidentContext,
@@ -2131,6 +2174,7 @@ export class Orchestrator {
       onebot: this.onebot,
       store: this.store,
       memory: this.memory,
+      notebook: this.notebook,
       identityPilot,
       stickers: this.stickers,
       sender: this.sender,
