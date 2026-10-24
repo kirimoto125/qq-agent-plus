@@ -120,6 +120,7 @@ import { buildReminderNote, reminderNoteCost } from './reminders.js';
 import { ZONE_OFFSET_MS, minuteOfDayInZone, randInt, createEventBus, todayKey } from './util.js';
 import { buildSystemPrompt, buildUserPrompt, isAtMe, resolveContextTier } from '../llm/prompt.js';
 import { chatCompletion, chatCompletionWithRetry, addUsage, emptyUsage, isRetryableError } from '../llm/llm.js';
+import { extractNotebookFacts } from '../memory/notebook-extract.js';
 import { buildToolDefs, toOpenAiTools, executeTool, platformToolAllowed } from '../tools/tools.js';
 import { normalizeMid } from '../tools/tools-core.js';
 import { visionEnabled } from '../llm/vision-scan.js';
@@ -1535,6 +1536,9 @@ export class Orchestrator {
   #recordNotebookEntry(session, { chatKey, triggerEntries }) {
     if (!this.notebook || typeof this.notebook.recordSession !== 'function') return;
     if (!Array.isArray(session?.sent) || session.sent.length === 0) return;
+    // 兜底补记：她几乎不主动调 notebook_write（实测 20 个会话 0 次），
+    // 私聊结束后用一次极小调用把事实抽进小本子。异步、失败静默，绝不拖慢收口。
+    this.#extractMemos(session, { chatKey, triggerEntries });
     try {
       const draft = session.handoffDraft || {};
       const fallbackIncoming = (triggerEntries || []).slice(-3)
@@ -1556,6 +1560,46 @@ export class Orchestrator {
     } catch (error) {
       log.warn('[notebook] 记录会话流水失败:', error?.message ?? error);
     }
+  }
+
+  /**
+   * 私聊收尾的兜底记事：抽 1~2 条"关于对方的事实"写进小本子。
+   * 只在私聊（多人对话的事实归属不清）、且这轮她没自己调 notebook_write 时才跑；
+   * 每天上限由 notebook-extract 自己控。异步执行，失败只记日志。
+   */
+  #extractMemos(session, { chatKey, triggerEntries }) {
+    if (!chatKey.startsWith('private:')) return;
+    if (!this.notebook || typeof this.notebook.remember !== 'function') return;
+    const used = [];
+    for (const message of session?.messages || []) {
+      if (message?.toolCall?.name) used.push(message.toolCall.name);
+      for (const call of message?.tool_calls || []) {
+        const name = call?.function?.name;
+        if (name) used.push(name);
+      }
+    }
+    if (used.includes('notebook_write')) return;
+
+    const turns = [];
+    for (const item of (triggerEntries || []).slice(-6)) {
+      if (item?.text && !item.self) turns.push({ role: 'them', text: String(item.text) });
+    }
+    for (const sent of (session?.sent || []).slice(-6)) {
+      if (sent?.type === 'text' && sent.text) turns.push({ role: 'me', text: String(sent.text) });
+    }
+    if (turns.length < 2) return;
+
+    const peer = (triggerEntries || []).find((item) => !item?.self) || {};
+    extractNotebookFacts({
+      notebook: this.notebook,
+      dataDir: DATA_DIR,
+      chatKey,
+      peerId: String(peer.senderId || ''),
+      peerName: String(peer.senderName || ''),
+      turns,
+      callModel: chatCompletion,
+      log: (...args) => log.info(...args)
+    }).catch((error) => log.warn('[notebook] 兜底补记失败:', error?.message ?? error));
   }
 
   #commitSessionHandoff(session, { chatKey, triggerEntries }) {

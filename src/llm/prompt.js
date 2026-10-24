@@ -196,6 +196,7 @@ function memoryRules(identityPilotAvailable = false, friendProposalAvailable = f
   if (notebookAvailable) {
     lines.push(
       '- 【小本子】是你自己记的流水账（跟谁聊过什么、答应过谁什么、自己发过哪条说说）。他让你记住、你答应了什么、或聊到值得留到以后的事，就用 notebook_write 记一条；想确认以前聊过什么、答应过什么，先用 notebook_search 翻，别凭空猜、也别反过来问他"我们是不是聊过"。',
+      '- 每次调用 finish 之前想一下：这一轮有没有出现具体事实（他的计划、时间、地点、喜好、约定，或一句"记住…"）？有就先用 notebook_write 记一条再结束；只有寒暄、没有事实的轮次才跳过。流水是系统自动记的，不用你补。',
       '- 小本子里的东西可以自然提起，但不要逐条念、不要当成功劳簿；跨会话的内容只可意会，不得说出"在别的群/私聊里"这种来源。'
     );
   }
