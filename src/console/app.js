@@ -28,6 +28,7 @@ import { SessionRegistry, personaLabelOfPrompt } from '../core/sessions.js';
 import { Orchestrator } from '../core/orchestrator.js';
 import { Notebook } from '../memory/notebook.js';
 import { DailyMomentsManager } from '../features/daily-moments.js';
+import { OwnerPingManager } from '../features/owner-ping.js';
 import { QzoneInteractionManager } from '../features/qzone-interactions.js';
 import { GroupDigestManager } from '../features/group-digest.js';
 import { AdminBriefingManager } from '../features/admin-briefing.js';
@@ -640,6 +641,11 @@ export function createApp({
     emit,
     getIdentityPilot: () => identityPilot,
     getIncidentPilot: () => incidentPilot
+  });
+  // 定时问候：每 2~3 小时私聊管理员一条（走既有的主动唤醒链路，不直接发固定文案）
+  const ownerPing = new OwnerPingManager({
+    orchestrator,
+    log: moduleLog('owner-ping')
   });
   const dailyMoments = new DailyMomentsManager({
     store,
@@ -2105,6 +2111,27 @@ export function createApp({
   router.add('GET', '/api/model-prices', async (req, res, params, url) => json(res, 200, modelPricesPayload(url.searchParams.get('model'))));
   router.add('GET', '/api/vision/results', async (req, res) => json(res, 200, { results: { ...builtinVisionResults(currentProviders()), ...visionResults() }, scanning: visionScan.running }));
   router.add('GET', '/api/daily-moments/status', async (req, res) => json(res, 200, dailyMoments.status()));
+  // 定时问候：看状态 / 改节奏 / 立刻试一条
+  router.add('GET', '/api/owner-ping', async (req, res) => json(res, 200, ownerPing.status()));
+  router.add('POST', '/api/owner-ping', async (req, res) => {
+    const body = await readBody(req).catch(() => ({}));
+    try {
+      const patch = {};
+      if (body.enabled !== undefined) patch.enabled = body.enabled === true;
+      for (const key of ['minHours', 'maxHours', 'quietStart', 'quietEnd', 'skipIfActiveMinutes', 'note']) {
+        if (body[key] !== undefined) patch[key] = body[key];
+      }
+      if (Object.keys(patch).length) updateConfig({ ownerPing: patch });
+      return json(res, 200, { ok: true, status: ownerPing.reconfigure() });
+    } catch (error) {
+      return json(res, error.httpStatus || 400, { error: String(error?.message ?? error) });
+    }
+  });
+  router.add('POST', '/api/owner-ping/now', async (req, res) => {
+    const body = await readBody(req).catch(() => ({}));
+    if (body.confirm !== true) return json(res, 409, { error: '立即发一条需要显式确认' });
+    return json(res, 200, ownerPing.fireNow({ reschedule: body.reschedule !== false }));
+  });
   router.add('GET', '/api/qzone-interactions/status', async (req, res) => json(res, 200, qzoneInteractions.status()));
   router.add('GET', '/api/group-game/status', async (req, res) => json(res, 200, groupGame.status()));
   router.add('GET', '/api/group-digest/status', async (req, res) => json(res, 200, groupDigest.status()));
@@ -5123,6 +5150,7 @@ export function createApp({
     orchestrator.startRecoveryLoop();
     orchestrator.startReminderLoop();
     if (getConfig().dailyMoments?.enabled) dailyMoments.start();
+    ownerPing.start();
     if (getConfig().qzoneInteractions?.enabled) qzoneInteractions.start();
     if (getConfig().groupDigest?.enabled) groupDigest.start();
     if (getConfig().adminBriefing?.enabled) adminBriefing.start();
@@ -5190,6 +5218,7 @@ export function createApp({
     releaseTimeControl();
     dailyMoments.stop();
     dailyMoments.abort();
+    ownerPing.stop();
     qzoneInteractions.stop();
     // 群游戏/群日报的定时器也要停：store.close() 之后它们还在 tick 会撞已关闭的 sqlite，
     // 且群游戏 tick 会把 games.json 再写一遍（2026-10-07 复审 P3）。

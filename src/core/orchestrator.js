@@ -2114,8 +2114,12 @@ export class Orchestrator {
     this.sessions.update(session.id);
     this.emit('session-update', session.id);
 
+    // 定时问候（owner-ping）不是"她之前给自己留的话"，也不是别人托的提醒：
+    // 逐字当指令给她，收尾要求"发一条就结束"，否则模型会按 proactive 的口径
+    // 判成"也可以安静结束"，2~3 小时一条的约定就时有时无。
+    const isPingNote = String(wakeNote).startsWith('【定时问候】');
     const wakeLead = wakeNote
-      ? (String(wakeNote).startsWith('【系统提醒】')
+      ? (String(wakeNote).startsWith('【系统提醒】') || isPingNote
         ? safeSlice(String(wakeNote), 300)
         : `这是你自己之前安排的：${safeSlice(String(wakeNote), 300)}。现在时间到了，看看当前情况决定要不要说话。`)
       : '（主动机会）群里已经安静了一会儿。';
@@ -2137,9 +2141,11 @@ export class Orchestrator {
           + (selfWakeOn
             ? '，并用 schedule_wake 给自己安排下一次醒来的时间（比如几分钟后、或二三十分钟后）。'
             : '。（自安排唤醒已关闭，不用安排下次唤醒，系统会按配置的节奏再唤醒你。）'));
-    const wakeTail = String(wakeNote).startsWith('【系统提醒】')
-      ? '就按上面那条提醒处理：想补就补一句很短的，补完就放下；不想补就安静结束。'
-      : '你可以主动抛一个自然的话题（像随口说的，不要像播报），也可以判断没必要说话就安静结束。';
+    const wakeTail = isPingNote
+      ? '按上面的要求：用 send_message 发一条（只发一条，自然点，别像播报）；发完就结束，不用安排下一次唤醒。'
+      : (String(wakeNote).startsWith('【系统提醒】')
+        ? '就按上面那条提醒处理：想补就补一句很短的，补完就放下；不想补就安静结束。'
+        : '你可以主动抛一个自然的话题（像随口说的，不要像播报），也可以判断没必要说话就安静结束。');
     const currentUserMessage = {
       role: 'user',
       content: proactive && !manual

@@ -344,6 +344,17 @@ export const DEFAULT_CONFIG = {
     followUpEnabled: true,      // 发言后没人接话，过十来分钟补一句
     selfWakeEnabled: true       // 模型用 schedule_wake 给自己安排稍后的主动发言
   },
+  // 定时问候：每 2~3 小时让机器人在私聊里主动给管理员发一条消息（见 src/features/owner-ping.js）。
+  // 与 proactive 分开：那个是群聊冷场、概率触发；这个是固定间隔、只对管理员、可跨重启。
+  ownerPing: {
+    enabled: true,
+    minHours: 2,
+    maxHours: 3,
+    quietStart: '23:30',        // 夜里不打扰：静默时段内顺延到结束
+    quietEnd: '08:30',
+    skipIfActiveMinutes: 15,    // 刚聊过就别插一句，推迟 20 分钟
+    note: ''                    // 留空 = 用内置文案
+  },
   // 自主节奏（可选）：消息不再即时触发，改由模型按自己安排的节奏醒来统一处理。
   // 默认关闭；开启后建议先观察一段，确认能接受"延迟接话"的节奏。
   pacing: {
