@@ -233,6 +233,53 @@ function sliderFillPos(ratio) {
 
 // 设置页事件绑定：原来是一个 1544 行的单函数，按**安全边界**（两侧无共享局部名）切成 4 段。
 // 只切不改 —— 每段的语句与切分前逐字节一致，顺序、条件、守卫都没动；这里按原顺序调用。
+// ── 定时问候（owner-ping）：独立保存按钮，走 /api/owner-ping ──
+// 不接通用保存：这个开关的生效方式是"重排定时器"，与"写进 config 等下次运行"不同。
+function bindOwnerPingEvents() {
+  const status = $('#op-status');
+  const next = $('#op-next');
+  const say = (msg) => { if (status) status.textContent = msg; };
+  const showNext = (info) => {
+    if (!next) return;
+    next.textContent = info?.nextAt
+      ? `下一次：${new Date(info.nextAt).toLocaleString('zh-CN')}${info.enabled === false ? '（当前已关闭）' : ''}`
+      : '';
+  };
+  api('/api/owner-ping').then(showNext).catch(() => {});
+
+  const save = $('#op-save-btn');
+  if (save) save.addEventListener('click', async () => {
+    const payload = {
+      enabled: $('#cfg-op-enabled')?.checked === true,
+      minHours: Number($('#cfg-op-min')?.value) || 2,
+      maxHours: Number($('#cfg-op-max')?.value) || 3,
+      quietStart: $('#cfg-op-quiet-start')?.value || '23:30',
+      quietEnd: $('#cfg-op-quiet-end')?.value || '08:30'
+    };
+    try {
+      const result = await api('/api/owner-ping', { method: 'POST', body: JSON.stringify(payload) });
+      say(result?.status?.enabled ? '已保存 ✓' : '已保存（当前关闭）');
+      showNext(result?.status);
+    } catch (error) {
+      say(`保存失败：${error?.message || error}`);
+    }
+  });
+
+  const test = $('#op-test-btn');
+  if (test) test.addEventListener('click', async () => {
+    say('正在安排…');
+    try {
+      const result = await api('/api/owner-ping/now', {
+        method: 'POST',
+        body: JSON.stringify({ confirm: true, reschedule: false })
+      });
+      say(result?.ok ? '已安排，约 1 分钟后发出' : `没发：${result?.reason || '未知原因'}`);
+    } catch (error) {
+      say(`失败：${error?.message || error}`);
+    }
+  });
+}
+
 function bindSettingsEvents(c) {
   bindSettingsSaveAndSections();
   bindSettingsListsAndGroups(c);
@@ -244,6 +291,7 @@ function bindSettingsEvents(c) {
 // 由原 bindSettingsEvents 按"两侧无共享局部名"的安全边界切出，语句一字未改。
 function bindSettingsSaveAndSections() {
   if (state.settingsSection === 'time-control') bindTimeControlEvents();
+  if (state.settingsSection === 'owner-ping') bindOwnerPingEvents();
   // 保存当前区块设置（通用保存按钮）。只有当前区块的字段才会被读取，不会 null 报错。
   const saveCfgBtn = $('#save-cfg-btn');
   if (saveCfgBtn) saveCfgBtn.addEventListener('click', async () => {

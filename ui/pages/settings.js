@@ -72,7 +72,7 @@ function renderSettingsSidebar() {
   const menu = [
     ['对话与人格', [['persona', '人设'], ['chat', '聊天设置'], ['messageTypes', '消息类型'], ['allow', '聊天白名单'], ['memory', '记忆']]],
     ['模型与服务', [['api', '模型 API'], ['search', '搜索服务'], ['asr', '语音转文字'], ['token-saver', '省 Token']]],
-    ['自动行为', [['moments', '每日动态'], ['qzone-interactions', '动态互动'], ['reminders', '定时提醒'], ['groupGame', '群游戏'], ['time-control', '时间控制'], ['experiments', '实验功能']]],
+    ['自动行为', [['moments', '每日动态'], ['qzone-interactions', '动态互动'], ['reminders', '定时提醒'], ['owner-ping', '定时问候'], ['groupGame', '群游戏'], ['time-control', '时间控制'], ['experiments', '实验功能']]],
     ['平台', [['platform', '平台能力'], ['onebot', 'OneBot']]],
     ['系统', [['appearance', '外观'], ['desktop', '系统']]]
   ];
@@ -194,6 +194,7 @@ function renderSettingsSection(c) {
     groupGame: () => renderGroupGameSection(c),
     moments: () => renderDailyMomentsSection(c),
     reminders: () => renderRemindersSection(c),
+    'owner-ping': () => renderOwnerPingSection(c),
     'qzone-interactions': () => renderQzoneInteractionSection(c),
     'time-control': () => renderTimeControlSection(c),
     'token-saver': () => renderTokenSaverSection(c),
@@ -210,12 +211,63 @@ function renderSettingsSection(c) {
   // 保存条放在内容**末尾**并 sticky 贴底：长页面（人设页能滚好几屏）里从顶部就能看到它，
   // 一直悬在视口底部，滚到底时正好落在内容末尾。以前它渲染在最前面，既不悬浮又容易
   // 和分区里自己的保存按钮撞车（人设页就多过一个"保存人设修改"，其实调的是同一个保存）。
+  // 定时问候有自己的保存按钮（走 /api/owner-ping），不参与通用配置收集：
+  // 挂一条"保存设置"在这里只会让人以为它也能存，其实什么都不会发生。
+  if (sec === 'owner-ping') return render();
   return `
     ${render()}
     <div class="save-bar">
       <button class="btn btn-primary" id="save-cfg-btn">保存设置</button>
       <span id="cfg-save-result" class="muted"></span>
     </div>`;
+}
+
+/**
+ * 定时问候（owner-ping）：每 2~3 小时让她主动私聊管理员一条。
+ * 字段读写都走 /api/owner-ping，与通用配置表单解耦 —— 这个开关的生效方式是
+ * "重排定时器"，跟其它字段"保存到 config 等下次运行"不是一回事。
+ */
+function renderOwnerPingSection(c) {
+  const p = c.ownerPing || {};
+  const enabled = p.enabled !== false;
+  const min = Number(p.minHours) || 2;
+  const max = Number(p.maxHours) || 3;
+  const quietStart = String(p.quietStart || '23:30');
+  const quietEnd = String(p.quietEnd || '08:30');
+  return `
+    <h3 id="settings-owner-ping">定时问候</h3>
+    <div class="hint">每隔一段时间，让她在私聊里主动给你发一条消息。内容由她自己生成（会带上角色卡、记忆和小本子），不是固定文案。</div>
+    <div class="field">
+      <label>开关</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="cfg-op-enabled" ${enabled ? 'checked' : ''} />
+        <span>启用定时问候</span>
+      </label>
+      <div class="hint">关闭后不再发送；已经排好的那一次会取消。</div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>最短间隔（小时）</label>
+        <input type="number" id="cfg-op-min" min="0.5" max="12" step="0.5" value="${min}" />
+      </div>
+      <div class="field"><label>最长间隔（小时）</label>
+        <input type="number" id="cfg-op-max" min="0.5" max="12" step="0.5" value="${max}" />
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>静默开始</label>
+        <input type="time" id="cfg-op-quiet-start" value="${esc(quietStart)}" />
+      </div>
+      <div class="field"><label>静默结束</label>
+        <input type="time" id="cfg-op-quiet-end" value="${esc(quietEnd)}" />
+      </div>
+    </div>
+    <div class="hint">静默时段内不发，顺延到结束（默认 23:30–08:30）。另外：15 分钟内刚聊过、或她自己已经安排了话，这轮会推迟，不会插嘴。</div>
+    <div class="field" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" type="button" id="op-save-btn">保存定时问候</button>
+      <button class="btn btn-small" type="button" id="op-test-btn">现在试一条</button>
+      <span class="muted" id="op-status"></span>
+    </div>
+    <div class="hint" id="op-next"></div>`;
 }
 
 function renderApiSection(c) {
