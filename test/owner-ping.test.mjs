@@ -84,6 +84,24 @@ function fakeOrchestrator() {
   };
 }
 
+test('两种模式：browse 先刷再说、greet 直接说', () => {
+  const browseOrch = fakeOrchestrator();
+  const browse = new OwnerPingManager({ orchestrator: browseOrch, dataDir, now: () => at(10, 0) });
+  assert.equal(browse.fireNow().ok, true);
+  assert.match(browseOrch.calls[0].note, /【定时刷手机】/);
+  browse.stop();
+
+  const greetOrch = fakeOrchestrator();
+  const greetCfg = () => ({
+    admin: { ownerUin: '1255810349' },
+    ownerPing: { mode: 'greet', minHours: 2, maxHours: 3, quietStart: '23:30', quietEnd: '08:30', skipIfActiveMinutes: 0 }
+  });
+  const greet = new OwnerPingManager({ orchestrator: greetOrch, dataDir, now: () => at(10, 0), getConfigFn: greetCfg });
+  assert.equal(greet.fireNow().ok, true);
+  assert.match(greetOrch.calls[0].note, /【定时问候】/);
+  greet.stop();
+});
+
 test('立即发一条：排给管理员私聊，并落盘下一次', () => {
   const orchestrator = fakeOrchestrator();
   const mgr = new OwnerPingManager({ orchestrator, dataDir, now: () => at(10, 0), random: () => 0.5 });
@@ -92,7 +110,7 @@ test('立即发一条：排给管理员私聊，并落盘下一次', () => {
   assert.equal(orchestrator.calls.length, 1);
   const call = orchestrator.calls[0];
   assert.equal(call.chatKey, 'private:1255810349');
-  assert.match(call.note, /【定时问候】/);
+  assert.match(call.note, /【定时(问候|刷手机)】/);
   assert.equal(call.opts.kind, 'ownerPing');
   assert.equal(call.delayMs, 60000);
   const saved = JSON.parse(fs.readFileSync(path.join(dataDir, 'owner-ping.json'), 'utf8'));

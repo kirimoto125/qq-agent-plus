@@ -251,6 +251,7 @@ function bindOwnerPingEvents() {
   if (save) save.addEventListener('click', async () => {
     const payload = {
       enabled: $('#cfg-op-enabled')?.checked === true,
+      mode: $('#cfg-op-mode')?.value === 'greet' ? 'greet' : 'browse',
       minHours: Number($('#cfg-op-min')?.value) || 2,
       maxHours: Number($('#cfg-op-max')?.value) || 3,
       quietStart: $('#cfg-op-quiet-start')?.value || '23:30',

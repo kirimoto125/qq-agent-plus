@@ -11,8 +11,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR, getConfig } from '../core/config.js';
 
-const DEFAULT_NOTE = '【定时问候】到点了：主动给管理员发一条消息。可以说说你此刻在想什么、在做什么，或者问他一句；'
+const NOTE_GREET = '【定时问候】到点了：主动给管理员发一条消息。可以说说你此刻在想什么、在做什么，或者问他一句；'
   + '只发一条，别只发"在吗"，也别问"有什么可以帮你"。';
+// 先刷再说：给她一个"自己去看看"的机会，有内容才开口。
+// 不用虚拟机：browse_bilibili（B 站公开接口）+ web_search / web_fetch 已经够看；
+// 真正的差别是"看完之后有没有话"。
+const NOTE_BROWSE = '【定时刷手机】到点了：先自己看看，别急着说话。可以用 browse_bilibili 看 B 站热门'
+  + '（或按关键词搜），也可以 web_search 搜点你感兴趣的，挑一两页用 web_fetch 读正文。'
+  + '看到真有意思的，就用 send_message 跟管理员说一条（带上具体见闻，别复述标题、别像播报）；'
+  + '什么都没劲就安静结束，别为了发而发。';
 
 function clampClock(value, fallback) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? '').trim());
@@ -35,12 +42,13 @@ export function ownerPingConfig(cfg = getConfig()) {
   const minHours = hours(raw.minHours, 2, 0.5, 12);
   return {
     enabled: raw.enabled !== false,
+    mode: raw.mode === 'greet' ? 'greet' : 'browse',
     minHours,
     maxHours: Math.max(minHours, hours(raw.maxHours, 3, 0.5, 12)),
     quietStart: clampClock(raw.quietStart, '23:30'),
     quietEnd: clampClock(raw.quietEnd, '08:30'),
     skipIfActiveMinutes: Math.round(hours(raw.skipIfActiveMinutes, 15, 0, 240)),
-    note: String(raw.note || '').trim() || DEFAULT_NOTE
+    note: String(raw.note || '').trim()
   };
 }
 
@@ -83,11 +91,17 @@ export function nextPingAt(now, conf = ownerPingConfig(), random = Math.random) 
 }
 
 export class OwnerPingManager {
-  constructor({ orchestrator = null, dataDir = DATA_DIR, now = Date.now, random = Math.random, log = () => {} } = {}) {
+  constructor({
+    orchestrator = null, dataDir = DATA_DIR, now = Date.now, random = Math.random, log = () => {},
+    // 配置读取可注入：测试里要验证"换了模式会换文案"，不该靠改磁盘上的 config.json
+    // （config 模块会缓存，写文件不一定读得到）。
+    getConfigFn = getConfig
+  } = {}) {
     this.orchestrator = orchestrator;
     this.now = now;
     this.random = random;
     this.log = log;
+    this.getConfig = typeof getConfigFn === 'function' ? getConfigFn : getConfig;
     this.stateFile = path.join(dataDir, 'owner-ping.json');
     this.timer = null;
     this.state = this.#load();
@@ -113,13 +127,13 @@ export class OwnerPingManager {
   }
 
   #targetChat() {
-    const ownerUin = String(getConfig()?.admin?.ownerUin || '').trim();
+    const ownerUin = String(this.getConfig()?.admin?.ownerUin || '').trim();
     if (!/^\d{1,15}$/.test(ownerUin)) return '';
     return `private:${ownerUin}`;
   }
 
   start() {
-    const conf = ownerPingConfig();
+    const conf = ownerPingConfig(this.getConfig());
     if (!conf.enabled) {
       this.stop();
       this.#save({ enabled: false });
@@ -147,9 +161,10 @@ export class OwnerPingManager {
   }
 
   status() {
-    const conf = ownerPingConfig();
+    const conf = ownerPingConfig(this.getConfig());
     return {
       enabled: conf.enabled,
+      mode: conf.mode,
       minHours: conf.minHours,
       maxHours: conf.maxHours,
       quietStart: conf.quietStart,
@@ -176,7 +191,7 @@ export class OwnerPingManager {
    * 返回 { ok, reason, nextAt }：ok=false 时不排下一次，避免把用户手动试探变成固定节奏。
    */
   fireNow({ reschedule = true } = {}) {
-    const conf = ownerPingConfig();
+    const conf = ownerPingConfig(this.getConfig());
     if (!conf.enabled) return { ok: false, reason: '已关闭' };
     const chatKey = this.#targetChat();
     if (!chatKey) return { ok: false, reason: '没有可用的管理员 QQ 号（admin.ownerUin）' };
@@ -204,11 +219,13 @@ export class OwnerPingManager {
       } catch { /* 读不到最近消息就按"没聊过"处理 */ }
     }
 
-    orchestrator.scheduleInitiativeWake(chatKey, 60 * 1000, conf.note, { kind: 'ownerPing' });
+    // 两种模式：browse=先刷一会儿再说（默认），greet=直接说一句
+    const note = conf.note || (conf.mode === 'browse' ? NOTE_BROWSE : NOTE_GREET);
+    orchestrator.scheduleInitiativeWake(chatKey, 60 * 1000, note, { kind: 'ownerPing' });
     const nextAt = reschedule ? nextPingAt(this.now(), conf, this.random) : 0;
     this.#save({ lastFiredAt: this.now(), chatKey });
     if (nextAt) this.#arm(nextAt);
-    this.log(`[owner-ping] 已在 ${chatKey} 安排一条问候${nextAt ? `；下一次 ${new Date(nextAt).toLocaleString('zh-CN')}` : ''}`);
+    this.log(`[owner-ping] 已在 ${chatKey} 安排一条${conf.mode === 'browse' ? '「先刷再说」' : '问候'}${nextAt ? `；下一次 ${new Date(nextAt).toLocaleString('zh-CN')}` : ''}`);
     return { ok: true, chatKey, nextAt };
   }
 }

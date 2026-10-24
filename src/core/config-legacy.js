@@ -348,6 +348,8 @@ export const DEFAULT_CONFIG = {
   // 与 proactive 分开：那个是群聊冷场、概率触发；这个是固定间隔、只对管理员、可跨重启。
   ownerPing: {
     enabled: true,
+    // greet = 到点直接说一句；browse = 先自己刷一会儿（搜/读网页），有内容才说
+    mode: 'browse',
     minHours: 2,
     maxHours: 3,
     quietStart: '23:30',        // 夜里不打扰：静默时段内顺延到结束

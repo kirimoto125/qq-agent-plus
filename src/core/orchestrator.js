@@ -2117,7 +2117,12 @@ export class Orchestrator {
     // 定时问候（owner-ping）不是"她之前给自己留的话"，也不是别人托的提醒：
     // 逐字当指令给她，收尾要求"发一条就结束"，否则模型会按 proactive 的口径
     // 判成"也可以安静结束"，2~3 小时一条的约定就时有时无。
-    const isPingNote = String(wakeNote).startsWith('【定时问候】');
+    // 刷手机模式（【定时刷手机】）同理，但收尾是"有内容才说" —— 不能强制她开口。
+    // 用 startsWith 而不是组合正则：prompt-safety 会把源码里所有方括号段头抽出来逐个
+    // 断言可被弱化，正则里的组合写法会被当成一个"新段头"（2026-10-24 踩到）。
+    const noteStr = String(wakeNote || '');
+    const isPingNote = noteStr.startsWith('【定时问候】') || noteStr.startsWith('【定时刷手机】');
+    const isBrowseNote = noteStr.startsWith('【定时刷手机】');
     const wakeLead = wakeNote
       ? (String(wakeNote).startsWith('【系统提醒】') || isPingNote
         ? safeSlice(String(wakeNote), 300)
@@ -2142,7 +2147,9 @@ export class Orchestrator {
             ? '，并用 schedule_wake 给自己安排下一次醒来的时间（比如几分钟后、或二三十分钟后）。'
             : '。（自安排唤醒已关闭，不用安排下次唤醒，系统会按配置的节奏再唤醒你。）'));
     const wakeTail = isPingNote
-      ? '按上面的要求：用 send_message 发一条（只发一条，自然点，别像播报）；发完就结束，不用安排下一次唤醒。'
+      ? (isBrowseNote
+        ? '按上面的要求：先看再说。有值得说的就用 send_message 说一条（自然点，带上具体见闻）；没有就安静结束，不用安排下一次唤醒。'
+        : '按上面的要求：用 send_message 发一条（只发一条，自然点，别像播报）；发完就结束，不用安排下一次唤醒。')
       : (String(wakeNote).startsWith('【系统提醒】')
         ? '就按上面那条提醒处理：想补就补一句很短的，补完就放下；不想补就安静结束。'
         : '你可以主动抛一个自然的话题（像随口说的，不要像播报），也可以判断没必要说话就安静结束。');

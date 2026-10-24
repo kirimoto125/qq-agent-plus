@@ -13,6 +13,7 @@ export const EXPERIMENTAL_READ_ONLY_TOOLS = new Set([
   'memory_query',
   'person_memory_lookup',
   'notebook_search',        // 小本子是本地只读查询：与 memory_query 同类，可并发
+  'browse_bilibili',        // B 站公开接口只读：与 web_search 同类，可并发
   'web_search',
   'web_fetch',
   'dice',         // 纯计算、无 IO 与副作用，可并行

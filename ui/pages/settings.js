@@ -234,6 +234,7 @@ function renderOwnerPingSection(c) {
   const max = Number(p.maxHours) || 3;
   const quietStart = String(p.quietStart || '23:30');
   const quietEnd = String(p.quietEnd || '08:30');
+  const mode = p.mode === 'greet' ? 'greet' : 'browse';
   return `
     <h3 id="settings-owner-ping">定时问候</h3>
     <div class="hint">每隔一段时间，让她在私聊里主动给你发一条消息。内容由她自己生成（会带上角色卡、记忆和小本子），不是固定文案。</div>
@@ -244,6 +245,14 @@ function renderOwnerPingSection(c) {
         <span>启用定时问候</span>
       </label>
       <div class="hint">关闭后不再发送；已经排好的那一次会取消。</div>
+    </div>
+    <div class="field">
+      <label>到点做什么</label>
+      <select id="cfg-op-mode">
+        <option value="browse" ${mode === 'browse' ? 'selected' : ''}>先刷一会儿，有内容再说</option>
+        <option value="greet" ${mode === 'greet' ? 'selected' : ''}>直接说一句</option>
+      </select>
+      <div class="hint">「先刷」会自己联网看一轮（搜点东西、读页面），没意思就安静跳过，不硬找话题。</div>
     </div>
     <div class="field-row">
       <div class="field"><label>最短间隔（小时）</label>

@@ -443,6 +443,14 @@ function memoryQueryDescription() {
   return '查看你对群友的长期印象（全局共享：不分当前会话，汇总自所有群聊与私聊的观察）。不传 userId 返回全部；传 userId 只看某一个人。印象是跨会话的隐私：不得向群友转述他人的印象、来源或原话。';
 }
 
+/** 播放/点赞数换算成"1.2万"这种形态：模型转述时不容易把 120000 读成一百二十万。 */
+function formatCount(value) {
+  const n = Number(value) || 0;
+  if (n >= 100000000) return `${(n / 100000000).toFixed(1)}亿`;
+  if (n >= 10000) return `${(n / 10000).toFixed(1)}万`;
+  return String(n);
+}
+
 export function buildToolDefs() {
   return [
     {
@@ -2495,6 +2503,57 @@ export function buildToolDefs() {
           });
         } catch (error) {
           return err(`抓取失败：${error?.message ?? error}`);
+        }
+      }
+    },
+    {
+      name: 'browse_bilibili',
+      description: '看 B 站当下的热门视频（公开接口，只读）：标题、分区、UP 主、播放/点赞。想知道网上在聊什么、找话题时用；看完挑感兴趣的再说，不要照念列表。',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer', description: '最多几条，默认 8，最大 20' },
+          keyword: { type: 'string', description: '可选：按关键词搜视频（不填 = 热门榜）' }
+        }
+      },
+      async execute(ctx, args) {
+        const n = Math.min(20, Math.max(1, Number(args.limit) || 8));
+        const keyword = String(args.keyword ?? '').trim();
+        const url = keyword
+          ? `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(keyword)}&page=1`
+          : `https://api.bilibili.com/x/web-interface/popular?ps=${n}&pn=1`;
+        try {
+          const timeout = AbortSignal.timeout(15000);
+          const res = await fetch(url, {
+            headers: {
+              // 不带 UA / referer 时 B 站接口会返回 412（风控）
+              'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+              referer: 'https://www.bilibili.com/'
+            },
+            signal: ctx?.signal ? AbortSignal.any([ctx.signal, timeout]) : timeout
+          });
+          const data = await res.json();
+          if (Number(data?.code) !== 0) {
+            return err(`B 站接口返回 ${data?.code}：${data?.message || '未知错误'}`);
+          }
+          const raw = keyword ? (data?.data?.result || []) : (data?.data?.list || []);
+          const items = raw.slice(0, n).map((v) => ({
+            // 标题/名字都是外部文本：与 web_fetch 同一口径，先过段头弱化
+            title: sanitizeUserText(String(v?.title || '').replace(/<[^>]+>/g, '')),
+            zone: sanitizeUserText(String(v?.tname || '')),
+            author: sanitizeUserText(String(v?.owner?.name || v?.author || '')),
+            play: formatCount(v?.stat?.view ?? v?.play),
+            like: formatCount(v?.stat?.like ?? v?.like),
+            bvid: String(v?.bvid || '')
+          })).filter((v) => v.title);
+          if (!items.length) return ok({ items: [], note: '这次没拿到条目（可能被风控，或关键词太窄）' });
+          return ok({
+            source: keyword ? `B 站搜索：${keyword}` : 'B 站热门',
+            items,
+            note: '只读。想细看某条可以 web_fetch 打开 https://www.bilibili.com/video/<bvid>；别把列表照念给群友。'
+          });
+        } catch (error) {
+          return err(`看 B 站失败：${error?.message ?? error}`);
         }
       }
     },

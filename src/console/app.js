@@ -2118,7 +2118,7 @@ export function createApp({
     try {
       const patch = {};
       if (body.enabled !== undefined) patch.enabled = body.enabled === true;
-      for (const key of ['minHours', 'maxHours', 'quietStart', 'quietEnd', 'skipIfActiveMinutes', 'note']) {
+      for (const key of ['mode', 'minHours', 'maxHours', 'quietStart', 'quietEnd', 'skipIfActiveMinutes', 'note']) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
       if (Object.keys(patch).length) updateConfig({ ownerPing: patch });
