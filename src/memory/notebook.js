@@ -53,8 +53,9 @@ export function notebookStamp(ts, now = Date.now()) {
 /**
  * 某条记录能不能给这个会话看。
  * - self_post：公开内容（说说），哪都能看；
- * - chat / self_said：只在本会话；
- * - memo：默认跨会话可见（这正是"记事"的意义），但尊重 memory.visibility 的两条策略；
+ * - chat / self_said：跨会话可见（这是"跟谁聊过啥"的流水，是她自己的记忆），
+ *   但尊重 memory.visibility 的两条策略：perChat 只在本会话；hidePrivateInGroup 时私聊流水不进群；
+ * - memo：默认跨会话可见（这正是"记事"的意义），同样尊重两条策略；
  * - 未知类型一律不可见（fail closed）。
  */
 export function notebookVisible(note, chatKey = '', vis = null) {
@@ -63,7 +64,13 @@ export function notebookVisible(note, chatKey = '', vis = null) {
   const kind = String(note.kind || '');
   const own = String(note.chatKey || '');
   if (kind === 'self_post') return true;
-  if (kind === 'chat' || kind === 'self_said') return own === String(chatKey || '');
+  if (kind === 'chat' || kind === 'self_said') {
+    if (policy.mode === 'perChat') return own === String(chatKey || '');
+    if (policy.hidePrivateInGroup
+      && String(chatKey || '').startsWith('group:')
+      && own.startsWith('private:')) return false;
+    return true;
+  }
   if (kind === 'memo') {
     if (policy.mode === 'perChat' && own && own !== String(chatKey || '')) return false;
     if (policy.hidePrivateInGroup
@@ -225,12 +232,13 @@ export class Notebook {
       for (const line of personLines) if (!push(line)) break;
     }
 
-    // ② 本会话最近聊过什么（跨会话不搬原文）
+    // ② 最近跟人聊过什么（含别处，不标来源会话名；跨会话的原文不搬，只留摘要）
     if (conf.recentChat > 0) {
-      const rows = this.store.query({ kinds: ['chat'], chatKey, limit: conf.recentChat })
-        .filter((note) => notebookVisible(note, chatKey, vis));
+      const rows = this.store.query({ kinds: ['chat'], limit: conf.recentChat * 3 })
+        .filter((note) => notebookVisible(note, chatKey, vis))
+        .slice(0, conf.recentChat);
       if (rows.length) {
-        if (!push('这个会话最近聊过的：')) return lines.join('\n');
+        if (!push('你最近跟人聊过的（别处的内容不要说给这里的人听）：')) return lines.join('\n');
         for (const note of rows) {
           const topic = note.topic ? `（${oneLine(note.topic, 40)}）` : '';
           if (!push(`- [${notebookStamp(note.ts, now)}]${topic} ${oneLine(note.body, 160)}`)) break;

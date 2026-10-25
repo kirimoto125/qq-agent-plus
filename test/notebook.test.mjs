@@ -2,7 +2,7 @@
 //
 // 覆盖四件事：
 //   ① 存储层的幂等与按人检索（ref 去重、note_people 关联）；
-//   ② 可见性矩阵（chat 只在本会话、memo 可跨会话、self_post 公开、两条 visibility 策略）；
+//   ② 可见性矩阵（chat 跨会话可见、memo 可跨会话、self_post 公开、两条 visibility 策略）；
 //   ③ 提示词块：该带的带、不该带的（别的会话原文）不带；
 //   ④ 说说同步：按 tid 幂等，重复同步不长行；保留期回收能删老记录。
 import assert from 'node:assert/strict';
@@ -57,13 +57,26 @@ test('store: ref 幂等、按人可查、删除与统计', () => {
   }
 });
 
-test('可见性：chat 隔离、memo 跨会话、self_post 公开、尊重两条策略', () => {
+test('可见性：chat 跨会话可见、memo 跨会话、self_post 公开、尊重两条策略', () => {
   const chat = { kind: 'chat', chatKey: 'group:1' };
+  const privateChat = { kind: 'chat', chatKey: 'private:125' };
+  const selfSaid = { kind: 'self_said', chatKey: 'private:125' };
   const memo = { kind: 'memo', chatKey: 'private:125' };
   const post = { kind: 'self_post', chatKey: 'system:daily-moments' };
 
+  // global 模式：chat 跨会话可见（她记得跟谁聊过啥）
   assert.equal(notebookVisible(chat, 'group:1', { mode: 'global', hidePrivateInGroup: false }), true);
-  assert.equal(notebookVisible(chat, 'group:2', { mode: 'global', hidePrivateInGroup: false }), false);
+  assert.equal(notebookVisible(chat, 'group:2', { mode: 'global', hidePrivateInGroup: false }), true);
+  assert.equal(notebookVisible(chat, 'private:9', { mode: 'global', hidePrivateInGroup: false }), true);
+  // perChat 模式：仍只本会话
+  assert.equal(notebookVisible(chat, 'group:2', { mode: 'perChat', hidePrivateInGroup: false }), false);
+  assert.equal(notebookVisible(chat, 'group:1', { mode: 'perChat', hidePrivateInGroup: false }), true);
+  // hidePrivateInGroup：私聊流水不进群
+  assert.equal(notebookVisible(privateChat, 'group:2', { mode: 'global', hidePrivateInGroup: true }), false);
+  assert.equal(notebookVisible(privateChat, 'private:125', { mode: 'global', hidePrivateInGroup: true }), true);
+  // self_said 与 chat 同策略
+  assert.equal(notebookVisible(selfSaid, 'group:2', { mode: 'global', hidePrivateInGroup: true }), false);
+
   assert.equal(notebookVisible(memo, 'group:2', { mode: 'global', hidePrivateInGroup: false }), true);
   assert.equal(notebookVisible(memo, 'group:2', { mode: 'perChat', hidePrivateInGroup: false }), false);
   assert.equal(notebookVisible(memo, 'group:2', { mode: 'global', hidePrivateInGroup: true }), false);
@@ -73,7 +86,7 @@ test('可见性：chat 隔离、memo 跨会话、self_post 公开、尊重两条
   assert.equal(notebookVisible(null, 'group:1', { mode: 'global' }), false);
 });
 
-test('formatForPrompt：本会话流水不外泄，记事与说说照带', () => {
+test('formatForPrompt：流水跨会话可见（global 模式）、记事与说说照带', () => {
   const notebook = makeNotebook();
   notebook.remember({ chatKey: 'group:1', personId: '125', personName: '老王', text: '他下周三考试，考完请客' });
   notebook.recordSession({
@@ -94,21 +107,23 @@ test('formatForPrompt：本会话流水不外泄，记事与说说照带', () =>
   assert.match(inGroup, /【小本子】/);
   assert.match(inGroup, /老王（QQ 125）/);
   assert.match(inGroup, /下周三考试/);
-  assert.match(inGroup, /这个会话最近聊过的/);
+  assert.match(inGroup, /你最近跟人聊过的/);
   assert.match(inGroup, /那你先别熬夜了/);
   assert.match(inGroup, /今天试了家新面馆/);
   assert.doesNotMatch(inGroup, /没发出去/);   // publish-unknown 不能被当成发过的说说
 
-  // 换一个会话：只能看到跨会话的 memo 与公开说说，看不到 group:1 的聊天原文
+  // 换一个会话：global 模式流水跨会话可见（不标来源），记事与公开说说也在
   const otherGroup = notebook.formatForPrompt('group:2', { personIds: ['125'], now: NOW });
   assert.match(otherGroup, /下周三考试/);
-  assert.doesNotMatch(otherGroup, /压力挺大/);
-  assert.doesNotMatch(otherGroup, /先别熬夜/);
+  assert.match(otherGroup, /压力挺大/);
+  assert.match(otherGroup, /先别熬夜/);
 
-  // 无关会话 + 无关的人：别人的事与别的会话原文都不出现，但"自己发过的说说"是公开内容，照带
+  // 无关会话 + 无关的人：流水照跨会话可见（含 group:1 的内容），公开说说照带；
+  // 但 memo 是按人的，999 没有记事，所以老王那条记事不出现。
   const unrelated = notebook.formatForPrompt('group:3', { personIds: ['999'], now: NOW });
-  assert.doesNotMatch(unrelated, /老王/);
-  assert.doesNotMatch(unrelated, /压力挺大/);
+  assert.doesNotMatch(unrelated, /老王（QQ 125）/);
+  assert.match(unrelated, /压力挺大/);
+  assert.match(unrelated, /先别熬夜/);
   assert.match(unrelated, /今天试了家新面馆/);
 
   // 一条记录都没有时整块为空，不留空段头
