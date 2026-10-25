@@ -2188,6 +2188,97 @@ export function createApp({
       return json(res, 500, { error: String(error?.message ?? error) });
     }
   });
+  // 「试一条群话题」：只生成、不发送。挂起预览 → 触发一次 → 等运行结束 → 收起预览。
+  // 这样测试不会打扰群友，又能看到她完整的措辞与分享顺序。
+  router.add('POST', '/api/material/preview-topic', async (req, res) => {
+    const body = await readBody(req).catch(() => ({}));
+    if (body.confirm !== true) return json(res, 409, { error: '测试需要显式确认' });
+    const groupId = String(body.groupId || '').replace(/^group:/, '').trim();
+    if (!/^\d+$/.test(groupId)) return json(res, 400, { error: '要给 groupId' });
+    if (sender.previewMode) return json(res, 409, { error: '已经有一次测试在跑' });
+    try {
+      const chatKey = `group:${groupId}`;
+      // 预览期间要同时做两件事，缺一个就会漏发：
+      //   1) sender.previewMode：把 sendTextBatch/sendImage 拦在投递前，只记录；
+      //   2) orchestrator.suppressWakes：禁止任何排程唤醒在这期间被派发
+      //      （2026-10-25 实测：上一次预览结束后，之前排的 1 分钟唤醒照样跑了并真发到群里）。
+      const pending = orchestrator.scheduledWakes?.get?.(chatKey);
+      if (pending?.timer) clearTimeout(pending.timer);
+      orchestrator.scheduledWakes?.delete?.(chatKey);
+      sender.beginPreview();
+      orchestrator.suppressWakes = true;
+      const note = warmup.buildPreviewNote(chatKey);
+      if (!note) {
+        orchestrator.suppressWakes = false;
+        sender.endPreview();
+        return json(res, 400, { error: '素材池是空的，先刷一批' });
+      }
+      let runError = '';
+      const before = {
+        running: orchestrator.runningChats?.has(chatKey) || false,
+        paused: Boolean(orchestrator.paused),
+        aborted: Boolean(orchestrator.aborted),
+        noteHead: note.slice(0, 60)
+      };
+      try {
+        // manual 而不是只看 proactive：manual 会走"没有未读也基于最近存档跑一次"的正式路径，
+        // proactive 在没有未读时可能直接安静结束（预览就会空手而归）。
+        await orchestrator.wake(chatKey, { proactive: true, manual: true, wakeNote: note, force: true });
+      } catch (error) {
+        runError = String(error?.message ?? error);
+      } finally {
+        orchestrator.suppressWakes = false;
+      }
+      const items = sender.endPreview();
+      return json(res, 200, {
+        ok: !runError,
+        error: runError,
+        chatKey,
+        debug: { before, afterRunning: orchestrator.runningChats?.has(chatKey) || false },
+        // 空结果最常见的原因是 preflight 拦了（群里刚有消息 / 有运行在跑 / 不在发言时段）。
+        // 明确说出来，否则界面只会显示"她这次没打算说话"，容易误判成模型没兴趣。
+        note: items.length ? '' : '没有产生任何发送内容：可能被前置检查拦下（群里刚有消息、有运行在跑、或不在发言时段），也可能她判断不适合这个群',
+        items: items.map((item) => ({
+          type: item.payload?.type || '',
+          text: item.payload?.text || '',
+          url: item.payload?.url || '',
+          at: item.at
+        }))
+      });
+    } catch (error) {
+      sender.endPreview();
+      return json(res, 500, { error: String(error?.message ?? error) });
+    }
+  });
+  // 素材池浏览 / 删除 / 清过期
+  router.add('GET', '/api/material/pool', async (req, res) => {
+    try {
+      const notes = materials.list(200);
+      return json(res, 200, {
+        items: notes.map((note) => ({
+          id: note.id,
+          bvid: String(note.topic || ''),
+          title: String(note.body || '').split('｜')[0] || '',
+          detail: String(note.body || ''),
+          url: note.topic ? `https://www.bilibili.com/video/${note.topic}` : '',
+          expiresAt: Number(note.expiresAt) || 0,
+          ts: Number(note.ts) || 0
+        }))
+      });
+    } catch (error) {
+      return json(res, 500, { error: String(error?.message ?? error) });
+    }
+  });
+  router.add('DELETE', /^\/api\/material\/pool\/(\d+)$/, async (req, res, params) => {
+    const removed = notebook.store.deleteById(Number(params[1]));
+    return json(res, removed ? 200 : 404, removed ? { ok: true } : { error: '没有这条素材' });
+  });
+  router.add('POST', '/api/material/pool/prune', async (req, res) => {
+    const body = await readBody(req).catch(() => ({}));
+    if (body.confirm !== true) return json(res, 409, { error: '清理过期素材需要显式确认' });
+    const removed = notebook.store.pruneMaterials?.({ now: Date.now(), maxItems: 30 }) || 0;
+    return json(res, 200, { ok: true, removed });
+  });
   router.add('GET', '/api/group-game/status', async (req, res) => json(res, 200, groupGame.status()));
   router.add('GET', '/api/group-digest/status', async (req, res) => json(res, 200, groupDigest.status()));
   router.add('GET', '/api/admin-briefing/status', async (req, res) => json(res, 200, adminBriefing.status()));

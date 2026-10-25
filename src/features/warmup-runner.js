@@ -146,6 +146,20 @@ export class WarmupRunner {
     }
   }
 
+  /**
+   * 构造一条"群话题"唤醒指令（不排程、不计数）。
+   * 控制台的「试一条（只生成不发送）」直接拿它跑一次 wake，保证预览和真实开口用同一套文案。
+   */
+  buildPreviewNote(chatKey) {
+    const notes = this.materials.list(20);
+    if (!notes.length) return '';
+    const picked = pickMaterial(notes, new Set(this.state.usedRefs || []));
+    if (!picked) return '';
+    return `【群话题】群已经安静了一阵子。这是一条你觉得可以拿出来聊的素材：${describeMaterial(picked)}\n`
+      + '想聊就自然带出来（先说你自己的话，再用 share_topic 把素材分享出来，materialId 用上面那条的 id）；'
+      + '觉得不适合这个群就安静结束，别硬找话题。';
+  }
+
   /** 手动触发一次群话题（控制台"试一条"用）：绕过冷场与白名单判定，但仍受素材池约束。 */
   forceGroupTopic(groupId, { ignoreWhitelist = false } = {}) {
     const config = warmupConfig();

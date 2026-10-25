@@ -96,6 +96,27 @@ function muteUntilMs(raw, nowSec) {
 }
 
 export class SendQueue {
+  /**
+   * 预览模式：只记录"她本来要发什么"，不真正投递。
+   * 控制台的「试一条群话题（只生成不发送）」用它 —— 这样测试不会打扰群友，
+   * 又能看到完整的措辞与分享顺序。开关是进程内的，不落盘。
+   */
+  previewMode = false;
+  /** 预览模式下的收集器：{ chatKey, kind, text?, url?, image? }。 */
+  previewItems = [];
+
+  beginPreview() {
+    this.previewItems = [];
+    this.previewMode = true;
+  }
+
+  endPreview() {
+    this.previewMode = false;
+    const items = this.previewItems;
+    this.previewItems = [];
+    return items;
+  }
+
 /**
    * 送达之后的记账：把自己发出去的话写进库 + 通知 onSent。
    * 这些都是**发送成功之后**的副作用，失败绝不能把一次已经送达的发送改判成失败：
@@ -238,6 +259,11 @@ export class SendQueue {
     await this.#assertNotMuted(chatKey);
     // gameScoped：只由群游戏管理器对"本局在册玩家"设置（access.assertCanSend 里放宽 allow.private）
     assertCanSend(chatKey, options.signal, { gameScoped: options.gameScoped === true });
+    // 预览模式：不投递、不记账，只把"本来要发的东西"收起来给控制台看
+    if (this.previewMode) {
+      this.previewItems.push({ chatKey, payload: { ...payload }, at: Date.now() });
+      return { message_id: null, preview: true };
+    }
     const id = this.store.beginSend(chatKey, options.runId, payload);
     try {
       let data = null;

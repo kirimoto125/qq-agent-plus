@@ -1178,9 +1178,11 @@ export class Orchestrator {
     if (waitingId) this.#finishWaiting(waitingId, 'aborted', '排程失败');
   }
 
-  async #wake(chatKey, { proactive = false, manual = false, waitingSessionId = null, wakeNote = '', paced = false } = {}) {
+  async #wake(chatKey, { proactive = false, manual = false, waitingSessionId = null, wakeNote = '', paced = false, force = false } = {}) {
     try {
-      if (!this.#wakePreflight(chatKey, waitingSessionId)) return;
+      // force 只给控制台的"预览"用：已经明确知道要跑一次，且全部发送都被 sender 拦住，
+      // 不该再被"群里刚有消息 / 不在发言时段 / 并发满"这些闸门挡掉（否则预览经常空手而归）。
+      if (!force && !this.#wakePreflight(chatKey, waitingSessionId)) return;
     } catch (error) {
       log.error(`[orchestrator] 唤醒前置判定失败（${chatKey}）：`, error);
       if (waitingSessionId) this.#finishWaiting(waitingSessionId, 'aborted', '前置判定失败');
@@ -2611,6 +2613,9 @@ export class Orchestrator {
   }
 
   fireDueScheduledWakes() {
+    // 预览期不派发任何排程唤醒：控制台正在"只生成不发送"，此时冒出一条真实发送
+    // 会让预览形同虚设（2026-10-25 实测泄漏过一次）。
+    if (this.suppressWakes) return;
     const now = Date.now();
     const cfgNow = getConfig();
     for (const [chatKey, item] of [...this.scheduledWakes.entries()]) {

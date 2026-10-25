@@ -363,7 +363,35 @@ function renderMaterialSection(c) {
       <button class="btn btn-small" type="button" id="mat-refresh-btn">立刻刷一批</button>
       <span class="muted" id="mat-status"></span>
     </div>
-    <div class="hint" id="mat-pool"></div>`;
+    <div class="hint" id="mat-pool"></div>
+
+    <h4 style="margin-top:26px">素材池</h4>
+    <div class="hint">这里是还没过期的素材。删掉的她就不会再拿出来聊；过期的会自动清。</div>
+    <div class="field" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-small" type="button" id="mat-pool-refresh">刷新列表</button>
+      <button class="btn btn-small" type="button" id="mat-pool-prune">清空过期</button>
+      <span class="muted" id="mat-pool-status"></span>
+    </div>
+    <div id="mat-pool-list"></div>
+
+    <h4 style="margin-top:26px">试一条群话题</h4>
+    <div class="hint">让她现在就挑一条素材、像平时那样说话。<b>「只生成不发送」勾上时不会真的发到群里</b>，你能看到完整措辞与分享顺序。</div>
+    <div class="field-row">
+      <div class="field"><label>群号</label>
+        <input type="text" id="mat-test-group" inputmode="numeric" placeholder="例如 1081344047" />
+      </div>
+      <div class="field"><label>选项</label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="mat-test-preview" checked />
+          <span>只生成不发送</span>
+        </label>
+      </div>
+    </div>
+    <div class="field" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-primary" type="button" id="mat-test-btn">试一条</button>
+      <span class="muted" id="mat-test-status"></span>
+    </div>
+    <div id="mat-test-result"></div>`;
 }
 
 function renderApiSection(c) {

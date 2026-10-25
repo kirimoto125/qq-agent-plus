@@ -368,8 +368,122 @@ function bindMaterialEvents() {
       const result = await api('/api/material/refresh', { method: 'POST', body: JSON.stringify({ confirm: true }) });
       say(`刷完了：新增 ${result?.added ?? 0} 条（候选 ${result?.fetched ?? 0} 条）`);
       showPool();
+      loadPool();
     } catch (error) {
       say(`刷新失败：${error?.message || error}`);
+    }
+  });
+
+  // ── 素材池浏览 / 删除 ──
+  const poolList = $('#mat-pool-list');
+  const poolStatus = $('#mat-pool-status');
+  const poolSay = (msg) => { if (poolStatus) poolStatus.textContent = msg; };
+  const fmtLeft = (expiresAt) => {
+    if (!expiresAt) return '不过期';
+    const left = expiresAt - Date.now();
+    if (left <= 0) return '已过期';
+    const h = Math.floor(left / 3600000);
+    const m = Math.round((left % 3600000) / 60000);
+    return h > 0 ? `${h} 小时 ${m} 分后过期` : `${m} 分钟后过期`;
+  };
+
+  async function loadPool() {
+    if (!poolList) return;
+    poolList.innerHTML = '<div class="hint">加载中…</div>';
+    try {
+      const data = await api('/api/material/pool');
+      const items = data?.items || [];
+      if (!items.length) {
+        poolList.innerHTML = '<div class="hint">池子是空的</div>';
+        poolSay('');
+        return;
+      }
+      poolSay(`共 ${items.length} 条`);
+      poolList.innerHTML = items.map((item) => `
+        <div class="chat-item" data-pool-id="${Number(item.id) || 0}" style="cursor:default">
+          <div class="chat-item-title">
+            <span class="session-chat">${esc(item.title || '(无标题)')}</span>
+            <span class="muted">${esc(fmtLeft(item.expiresAt))}</span>
+          </div>
+          <div class="chat-item-sub">${esc(item.bvid)}${item.detail ? `｜${esc(String(item.detail).slice(0, 80))}` : ''}</div>
+          <div class="session-meta">
+            <button class="btn btn-small" type="button" data-pool-delete="${Number(item.id) || 0}">删除</button>
+          </div>
+        </div>`).join('');
+      poolList.querySelectorAll('[data-pool-delete]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = Number(btn.dataset.poolDelete);
+          btn.disabled = true;
+          try {
+            await api(`/api/material/pool/${id}`, { method: 'DELETE' });
+            loadPool();
+          } catch (error) {
+            poolSay(`删除失败：${error?.message || error}`);
+            btn.disabled = false;
+          }
+        });
+      });
+    } catch (error) {
+      poolList.innerHTML = `<div class="hint">加载失败：${esc(error?.message || error)}</div>`;
+    }
+  };
+  loadPool();
+
+  const poolRefresh = $('#mat-pool-refresh');
+  if (poolRefresh) poolRefresh.addEventListener('click', loadPool);
+
+  const prune = $('#mat-pool-prune');
+  if (prune) prune.addEventListener('click', async () => {
+    try {
+      const result = await api('/api/material/pool/prune', { method: 'POST', body: JSON.stringify({ confirm: true }) });
+      poolSay(`清掉 ${result?.removed ?? 0} 条`);
+      loadPool();
+    } catch (error) {
+      poolSay(`清理失败：${error?.message || error}`);
+    }
+  });
+
+  // ── 试一条群话题 ──
+  const testBtn = $('#mat-test-btn');
+  const testStatus = $('#mat-test-status');
+  const testResult = $('#mat-test-result');
+  const testSay = (msg) => { if (testStatus) testStatus.textContent = msg; };
+  if (testBtn) testBtn.addEventListener('click', async () => {
+    const groupId = String($('#mat-test-group')?.value || '').trim().replace(/^group:/, '');
+    if (!/^\d+$/.test(groupId)) { testSay('群号只能是数字'); return; }
+    const preview = $('#mat-test-preview')?.checked !== false;
+    testBtn.disabled = true;
+    testSay(preview ? '正在生成（不发送，大约 1-2 分钟）…' : '正在生成并发送…');
+    if (testResult) testResult.innerHTML = '';
+    try {
+      if (preview) {
+        const result = await api('/api/material/preview-topic', {
+          method: 'POST',
+          body: JSON.stringify({ confirm: true, groupId })
+        });
+        const items = result?.items || [];
+        if (!items.length) {
+          testSay(result?.note || '她这次没打算说话（或没跑起来）');
+        } else {
+          testSay(`生成完成：${items.length} 条（未发送）`);
+          if (testResult) {
+            testResult.innerHTML = items.map((item) => {
+              const text = item.text || item.url || `[${item.type}]`;
+              return `<div class="chat-item" style="cursor:default"><div class="chat-item-sub" style="white-space:pre-wrap">${esc(text)}</div></div>`;
+            }).join('');
+          }
+        }
+      } else {
+        const result = await api('/api/material/test-topic', {
+          method: 'POST',
+          body: JSON.stringify({ confirm: true, groupId })
+        });
+        testSay(result?.ok ? `已安排：${result.title || ''}（约 1 分钟后发出）` : `没发：${result?.reason || '未知原因'}`);
+      }
+    } catch (error) {
+      testSay(`失败：${error?.message || error}`);
+    } finally {
+      testBtn.disabled = false;
     }
   });
 }
