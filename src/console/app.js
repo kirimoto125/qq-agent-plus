@@ -29,6 +29,9 @@ import { Orchestrator } from '../core/orchestrator.js';
 import { Notebook } from '../memory/notebook.js';
 import { DailyMomentsManager } from '../features/daily-moments.js';
 import { OwnerPingManager } from '../features/owner-ping.js';
+import { MaterialService } from '../features/material-pool.js';
+import { WarmupRunner } from '../features/warmup-runner.js';
+import { warmupConfig } from '../features/warmup-scheduler.js';
 import { QzoneInteractionManager } from '../features/qzone-interactions.js';
 import { GroupDigestManager } from '../features/group-digest.js';
 import { AdminBriefingManager } from '../features/admin-briefing.js';
@@ -627,10 +630,14 @@ export function createApp({
     // 插件声明 send 能力后，发言走机器人自己那条发送队列（禁言/限频/白名单/记账全在里面）
     getSender: () => sender
   });
+  // 素材池：必须在 orchestrator 之前建 —— share_topic 工具要用它（ctx.materials），
+  // 而 orchestrator 构造时就把它接进去了。放在后面会出现"工具存在但 ctx 里没有"。
+  const materials = new MaterialService({ notebook, log: moduleLog('material') });
   const orchestrator = new Orchestrator({
     store,
     memory,
     notebook,
+    materials,
     stickers,
     sender,
     sessions,
@@ -646,6 +653,15 @@ export function createApp({
   const ownerPing = new OwnerPingManager({
     orchestrator,
     log: moduleLog('owner-ping')
+  });
+  // 暖场运行器：抓素材 → 群里冷场时开口 → 私聊分享/搭话。
+  // 与 ownerPing 分开：那个是"到点问候"，这个依赖"有没有素材"。
+  const warmup = new WarmupRunner({
+    orchestrator,
+    notebook,
+    materials,
+    store,
+    log: moduleLog('warmup')
   });
   const dailyMoments = new DailyMomentsManager({
     store,
@@ -2133,6 +2149,45 @@ export function createApp({
     return json(res, 200, ownerPing.fireNow({ reschedule: body.reschedule !== false }));
   });
   router.add('GET', '/api/qzone-interactions/status', async (req, res) => json(res, 200, qzoneInteractions.status()));
+  // 素材与暖场：看状态 / 改配置 / 手动刷一次 / 立刻试一条群话题
+  router.add('GET', '/api/material/status', async (req, res) => {
+    return json(res, 200, { ...warmup.status(), config: warmupConfig() });
+  });
+  router.add('POST', '/api/material', async (req, res) => {
+    const body = await readBody(req).catch(() => ({}));
+    try {
+      const patch = {};
+      for (const key of ['enabled', 'refreshMinMinutes', 'refreshMaxMinutes', 'ttlHours', 'maxItems',
+        'perRun', 'quietStart', 'quietEnd', 'keywords', 'groupWhitelist', 'groupIdleMinutes',
+        'groupMaxPerDay', 'groupMinGapHours', 'privateChatEnabled', 'privateMaxPerDay', 'privateIdleHours']) {
+        if (body[key] !== undefined) patch[key] = body[key];
+      }
+      if (Object.keys(patch).length) updateConfig({ material: patch });
+      return json(res, 200, { ok: true, status: warmup.status(), config: warmupConfig() });
+    } catch (error) {
+      return json(res, error.httpStatus || 400, { error: String(error?.message ?? error) });
+    }
+  });
+  router.add('POST', '/api/material/refresh', async (req, res) => {
+    const body = await readBody(req).catch(() => ({}));
+    if (body.confirm !== true) return json(res, 409, { error: '刷新素材需要显式确认' });
+    try {
+      return json(res, 200, await warmup.refreshMaterials());
+    } catch (error) {
+      return json(res, 500, { error: String(error?.message ?? error) });
+    }
+  });
+  router.add('POST', '/api/material/test-topic', async (req, res) => {
+    const body = await readBody(req).catch(() => ({}));
+    if (body.confirm !== true) return json(res, 409, { error: '试一条群话题需要显式确认' });
+    const groupId = String(body.groupId || '').replace(/^group:/, '').trim();
+    if (!/^\d+$/.test(groupId)) return json(res, 400, { error: '要给 groupId' });
+    try {
+      return json(res, 200, warmup.forceGroupTopic(groupId, { ignoreWhitelist: body.ignoreWhitelist === true }));
+    } catch (error) {
+      return json(res, 500, { error: String(error?.message ?? error) });
+    }
+  });
   router.add('GET', '/api/group-game/status', async (req, res) => json(res, 200, groupGame.status()));
   router.add('GET', '/api/group-digest/status', async (req, res) => json(res, 200, groupDigest.status()));
   router.add('GET', '/api/admin-briefing/status', async (req, res) => json(res, 200, adminBriefing.status()));
@@ -5151,6 +5206,7 @@ export function createApp({
     orchestrator.startReminderLoop();
     if (getConfig().dailyMoments?.enabled) dailyMoments.start();
     ownerPing.start();
+    warmup.start();
     if (getConfig().qzoneInteractions?.enabled) qzoneInteractions.start();
     if (getConfig().groupDigest?.enabled) groupDigest.start();
     if (getConfig().adminBriefing?.enabled) adminBriefing.start();
@@ -5219,6 +5275,7 @@ export function createApp({
     dailyMoments.stop();
     dailyMoments.abort();
     ownerPing.stop();
+    warmup.stop();
     qzoneInteractions.stop();
     // 群游戏/群日报的定时器也要停：store.close() 之后它们还在 tick 会撞已关闭的 sqlite，
     // 且群游戏 tick 会把 games.json 再写一遍（2026-10-07 复审 P3）。

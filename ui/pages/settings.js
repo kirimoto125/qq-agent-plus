@@ -72,7 +72,7 @@ function renderSettingsSidebar() {
   const menu = [
     ['对话与人格', [['persona', '人设'], ['chat', '聊天设置'], ['messageTypes', '消息类型'], ['allow', '聊天白名单'], ['memory', '记忆']]],
     ['模型与服务', [['api', '模型 API'], ['search', '搜索服务'], ['asr', '语音转文字'], ['token-saver', '省 Token']]],
-    ['自动行为', [['moments', '每日动态'], ['qzone-interactions', '动态互动'], ['reminders', '定时提醒'], ['owner-ping', '定时问候'], ['groupGame', '群游戏'], ['time-control', '时间控制'], ['experiments', '实验功能']]],
+    ['自动行为', [['moments', '每日动态'], ['qzone-interactions', '动态互动'], ['reminders', '定时提醒'], ['owner-ping', '定时问候'], ['material', '素材与话题'], ['groupGame', '群游戏'], ['time-control', '时间控制'], ['experiments', '实验功能']]],
     ['平台', [['platform', '平台能力'], ['onebot', 'OneBot']]],
     ['系统', [['appearance', '外观'], ['desktop', '系统']]]
   ];
@@ -195,6 +195,7 @@ function renderSettingsSection(c) {
     moments: () => renderDailyMomentsSection(c),
     reminders: () => renderRemindersSection(c),
     'owner-ping': () => renderOwnerPingSection(c),
+    material: () => renderMaterialSection(c),
     'qzone-interactions': () => renderQzoneInteractionSection(c),
     'time-control': () => renderTimeControlSection(c),
     'token-saver': () => renderTokenSaverSection(c),
@@ -213,7 +214,7 @@ function renderSettingsSection(c) {
   // 和分区里自己的保存按钮撞车（人设页就多过一个"保存人设修改"，其实调的是同一个保存）。
   // 定时问候有自己的保存按钮（走 /api/owner-ping），不参与通用配置收集：
   // 挂一条"保存设置"在这里只会让人以为它也能存，其实什么都不会发生。
-  if (sec === 'owner-ping') return render();
+  if (sec === 'owner-ping' || sec === 'material') return render();
   return `
     ${render()}
     <div class="save-bar">
@@ -277,6 +278,92 @@ function renderOwnerPingSection(c) {
       <span class="muted" id="op-status"></span>
     </div>
     <div class="hint" id="op-next"></div>`;
+}
+
+/**
+ * 素材与话题（material）：B 站素材池 + 群暖场 + 私聊分享。
+ * 与「定时问候」一样走自己的接口（/api/material），不混进通用配置表单 ——
+ * 这些字段的生效方式是"重排定时器/重算白名单"，不是"写进 config 等下次运行"。
+ */
+function renderMaterialSection(c) {
+  const m = c.material || {};
+  const enabled = m.enabled !== false;
+  const whitelist = Array.isArray(m.groupWhitelist) ? m.groupWhitelist : [];
+  const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  return `
+    <h3 id="settings-material">素材与话题</h3>
+    <div class="hint">每隔一阵去 B 站捞点东西存着；群里冷场时挑一条开口，私聊里分享或单纯找你说话。刷素材不花 token。</div>
+
+    <div class="field">
+      <label>开关</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="cfg-mat-enabled" ${enabled ? 'checked' : ''} />
+        <span>启用素材池与暖场</span>
+      </label>
+    </div>
+
+    <div class="field-row">
+      <div class="field"><label>刷新间隔（分钟，随机区间）</label>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="number" id="cfg-mat-refresh-min" min="30" max="360" value="${num(m.refreshMinMinutes, 60)}" />
+          <span class="muted">~</span>
+          <input type="number" id="cfg-mat-refresh-max" min="30" max="720" value="${num(m.refreshMaxMinutes, 90)}" />
+        </div>
+      </div>
+      <div class="field"><label>素材保鲜（小时）</label>
+        <input type="number" id="cfg-mat-ttl" min="1" max="72" value="${num(m.ttlHours, 12)}" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>搜索关键词（逗号分隔，刷素材时按这些词搜）</label>
+      <input type="text" id="cfg-mat-keywords" value="${esc(Array.isArray(m.keywords) ? m.keywords.join(', ') : '游戏, 单机游戏, 电竞')}" />
+    </div>
+
+    <div class="field">
+      <label>群白名单（只有这些群会主动开话题；留空 = 完全不开）</label>
+      <div id="mat-whitelist" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px"></div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="cfg-mat-add-group" placeholder="输入群号后回车添加" inputmode="numeric" style="flex:1" />
+        <button class="btn btn-small" type="button" id="mat-add-group-btn">添加</button>
+      </div>
+      <div class="hint">当前：<span id="mat-whitelist-text">${whitelist.length ? esc(whitelist.join('、')) : '（空）'}</span></div>
+    </div>
+
+    <div class="field-row">
+      <div class="field"><label>群安静多久算冷场（分钟）</label>
+        <input type="number" id="cfg-mat-idle" min="10" max="480" value="${num(m.groupIdleMinutes, 45)}" />
+      </div>
+      <div class="field"><label>每群每天最多开几次</label>
+        <input type="number" id="cfg-mat-maxday" min="1" max="12" value="${num(m.groupMaxPerDay, 2)}" />
+      </div>
+      <div class="field"><label>两次之间至少隔（小时）</label>
+        <input type="number" id="cfg-mat-gap" min="1" max="24" value="${num(m.groupMinGapHours, 3)}" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label>私聊</label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="cfg-mat-private" ${m.privateChatEnabled !== false ? 'checked' : ''} />
+        <span>没素材时也允许她“无聊找你说话”</span>
+      </label>
+      <div class="field-row" style="margin-top:8px">
+        <div class="field"><label>一天最多几次</label>
+          <input type="number" id="cfg-mat-private-max" min="1" max="10" value="${num(m.privateMaxPerDay, 2)}" />
+        </div>
+        <div class="field"><label>至少多久没聊（小时）</label>
+          <input type="number" id="cfg-mat-private-idle" min="1" max="48" value="${num(m.privateIdleHours, 3)}" />
+        </div>
+      </div>
+    </div>
+
+    <div class="field" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-primary" type="button" id="mat-save-btn">保存素材设置</button>
+      <button class="btn btn-small" type="button" id="mat-refresh-btn">立刻刷一批</button>
+      <span class="muted" id="mat-status"></span>
+    </div>
+    <div class="hint" id="mat-pool"></div>`;
 }
 
 function renderApiSection(c) {

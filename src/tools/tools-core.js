@@ -2507,6 +2507,98 @@ export function buildToolDefs() {
       }
     },
     {
+      name: 'share_topic',
+      description: '分享一个素材（通常是 B 站视频）到当前会话：先说你自己的那句话，**再发 BV 号（必须）**，要不要配封面图由你决定。想暖场、想分享见闻时用；一次只分享一条，别连着发。素材 id 从【素材本】里取，也可以直接传 url。',
+      parameters: {
+        type: 'object',
+        properties: {
+          materialId: { type: ['integer', 'string'], description: '【素材本】里那条的 id（优先）' },
+          url: { type: 'string', description: '没有 id 时直接给视频链接或 BV 号' },
+          note: { type: 'string', description: '你想配的那句话（会先作为一条文本发出去）；可不填' },
+          withImage: { type: 'boolean', description: '要不要配封面图：默认 false。觉得画面本身有看点才传 true' }
+        }
+      },
+      async execute(ctx, args) {
+        if (!ctx.materials?.resolve) return err('素材功能当前不可用');
+        const material = await ctx.materials.resolve({
+          id: args.materialId,
+          url: args.url
+        });
+        const bvid = String(material?.bvid || args.url || '').match(/BV[0-9A-Za-z]+/)?.[0] || '';
+        if (!bvid && !material?.url) return err('找不到这条素材（id 不对，或它已过期）');
+        const note = String(args.note ?? '').trim();
+        const withImage = args.withImage === true;
+        try {
+          if (note) {
+            await ctx.sender.sendTextBatch(ctx.chatKey, [note], {
+              runId: ctx.session?.leaseId,
+              signal: ctx.signal,
+              preserveCode: true
+            });
+          }
+          if (withImage && material?.cover) {
+            try {
+              await ctx.sender.sendImage(ctx.chatKey, material.cover, {
+                runId: ctx.session?.leaseId,
+                signal: ctx.signal
+              });
+            } catch (error) {
+              // 封面图发不出去不是致命错误：BV 号照发，别让整次分享失败
+              ctx.emit?.('session-update', ctx.session?.id);
+            }
+          }
+          // 标题与 BV 号**分两条**发：BV 号单独一条，群友长按就能复制，
+          // 混在标题里会连标题一起复制。不发完整链接（协议端转不了卡片）。
+          const bvid = String(material.bvid || '').match(/BV[0-9A-Za-z]+/)?.[0] || '';
+          if (!bvid) return err('这条素材没有 BV 号，换一条或者直接传 BV 号');
+          const tail = [material?.title, bvid].filter(Boolean);
+          await ctx.sender.sendTextBatch(ctx.chatKey, tail, {
+            runId: ctx.session?.leaseId,
+            signal: ctx.signal
+          });
+          return ok({
+            shared: true,
+            title: material?.title || '',
+            bvid,
+            note: '已分享。不要再说"已经把链接发给你了"这类汇报，继续正常聊天或结束。'
+          });
+        } catch (error) {
+          return err(`分享失败：${error?.message ?? error}`);
+        }
+      }
+    },
+    {
+      name: 'watch_video',
+      description: '真的“看”一条 B 站视频：下载音频、本地转写成文字，然后你就能聊它讲了什么。适合素材本里那条你**真的想聊**的视频；一条要花 1 分钟左右，别对每条都用。转写是语音识别，个别字会错、也可能没有台词（纯音乐）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', description: 'BV 号（如 BV1w2Hw6KE1j）或 B 站视频链接' }
+        },
+        required: ['target']
+      },
+      async execute(ctx, args) {
+        if (!ctx.watchVideo) return err('看视频功能当前不可用');
+        const target = String(args.target ?? '').trim();
+        if (!target) return err('要给一个 BV 号或视频链接');
+        try {
+          const result = await ctx.watchVideo(target);
+          if (!result?.ok) {
+            return err(`没能转出内容：${result?.error || '没有识别出人声'}（可以改用标题和标签聊聊，别编造内容）`);
+          }
+          return ok({
+            title: result.title,
+            bvid: result.bvid,
+            durationSec: result.durationSec,
+            chars: result.chars,
+            transcript: ctx.watchVideoFormat ? ctx.watchVideoFormat(result) : result.text
+          });
+        } catch (error) {
+          return err(`看视频失败：${error?.message ?? error}`);
+        }
+      }
+    },
+    {
       name: 'browse_bilibili',
       description: '看 B 站当下的热门视频（公开接口，只读）：标题、分区、UP 主、播放/点赞。想知道网上在聊什么、找话题时用；看完挑感兴趣的再说，不要照念列表。',
       parameters: {

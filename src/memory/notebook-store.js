@@ -18,7 +18,8 @@ import path from 'node:path';
 import { DATA_DIR } from '../core/config.js';
 import { openDatabase } from '../core/sqlite.js';
 
-export const NOTEBOOK_KINDS = ['chat', 'memo', 'self_post', 'self_said'];
+// topic = 素材池条目（B 站视频等），带 URL 与过期时间，由素材抓取器写入、暖场/私聊读取。
+export const NOTEBOOK_KINDS = ['chat', 'memo', 'self_post', 'self_said', 'topic'];
 
 // group_concat 的分隔符必须用不可能出现在正文里的控制字符：
 // 用 ';' 或 '|' 时，群友名字/正文里带一个就会把解析搞崩。
@@ -195,6 +196,24 @@ export class NotebookStore {
   deleteById(id) {
     const result = this.db.prepare('DELETE FROM notes WHERE id = ?').run(Number(id) || 0);
     return Number(result.changes) > 0;
+  }
+
+  /**
+   * 素材池回收：删掉已过期的 topic，再把超出上限的最旧条目挤掉。
+   * 只作用于 kind='topic'，不碰流水/记事——那些有自己的保留期（prune）。
+   */
+  pruneMaterials({ kind = 'topic', now = Date.now(), maxItems = 30 } = {}) {
+    let removed = Number(this.db.prepare(
+      'DELETE FROM notes WHERE kind = ? AND expires_at > 0 AND expires_at <= ?'
+    ).run(String(kind), Number(now) || Date.now()).changes) || 0;
+    const count = Number(this.db.prepare('SELECT COUNT(*) AS n FROM notes WHERE kind = ?').get(String(kind))?.n) || 0;
+    const cap = Math.max(1, Number(maxItems) || 30);
+    if (count > cap) {
+      removed += Number(this.db.prepare(
+        'DELETE FROM notes WHERE id IN (SELECT id FROM notes WHERE kind = ? ORDER BY ts ASC, id ASC LIMIT ?)'
+      ).run(String(kind), count - cap).changes) || 0;
+    }
+    return removed;
   }
 
   /**

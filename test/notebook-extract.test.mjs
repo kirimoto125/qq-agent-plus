@@ -77,7 +77,9 @@ test('正常抽取：写入 memo，并消耗一次预算', async () => {
   assert.equal(calls[0].kind, 'memo');
   assert.equal(calls[0].personId, '125');
   assert.equal(calls[0].source, 'extract');
-  assert.equal(readBudget(dir).count, 1);
+  // 读预算时必须带同一个 now：readBudget 的默认参数是真实当前时间，
+  // 和写入用的固定时间不在同一天时会返回 0（测试曾因此误报）。
+  assert.equal(readBudget(dir, Date.UTC(2026, 9, 24, 4)).count, 1);
 });
 
 test('模型失败 / 超日限额时不写，且失败不抛', async () => {

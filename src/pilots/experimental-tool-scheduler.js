@@ -14,6 +14,7 @@ export const EXPERIMENTAL_READ_ONLY_TOOLS = new Set([
   'person_memory_lookup',
   'notebook_search',        // 小本子是本地只读查询：与 memory_query 同类，可并发
   'browse_bilibili',        // B 站公开接口只读：与 web_search 同类，可并发
+  'watch_video',            // 下载+本地转写：只读外部内容，可并发启动（自身已有单飞锁）
   'web_search',
   'web_fetch',
   'dice',         // 纯计算、无 IO 与副作用，可并行
@@ -53,6 +54,8 @@ export const EXPERIMENTAL_SAME_ROUND_ACTION_TOOLS = new Set([
   'send_message',
   'send_sticker',
   'send_face',
+  // 分享素材 = 文本 + 图片 + 链接三条，属于对外动作，必须按宿主顺序、不能并发预启动
+  'share_topic',
   'send_poke',
   'schedule_wake',
   'memory_append',

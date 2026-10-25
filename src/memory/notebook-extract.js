@@ -74,9 +74,11 @@ export function readBudget(dataDir, now = Date.now()) {
   return { day, count: 0 };
 }
 
-function bumpBudget(dataDir, day) {
+function bumpBudget(dataDir, day, now = Date.now()) {
   try {
-    const current = readBudget(dataDir);
+    // 读的时候必须带同一个 now：readBudget 的默认参数是真实当前时间，
+    // 调用方传了固定 now（测试）或跨天时，两边算出的 day 会不一致、计数被清零。
+    const current = readBudget(dataDir, now);
     const next = { day, count: (current.day === day ? current.count : 0) + 1 };
     fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     const tmp = `${budgetFile(dataDir)}.${process.pid}.tmp`;
@@ -114,7 +116,7 @@ export async function extractNotebookFacts({
     return { added: 0, skipped: 'daily-limit' };
   }
 
-  bumpBudget(dataDir, budget.day);
+  bumpBudget(dataDir, budget.day, now);
   let reply = '';
   try {
     const result = await callModel({

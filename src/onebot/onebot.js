@@ -503,6 +503,37 @@ export class OneBotClient {
     this.wsPending.clear();
   }
 
+  /**
+   * 发一张普通图片（不进表情库）。
+   * 刻意不带 sub_type/summary：带了就是"按表情样式发出"，而不带就是普通图片 —— 素材封面走这里。
+   */
+  async sendImage(kind, id, imageUrl, { replyToMessageId = null, atUserId = null, signal } = {}) {
+    const segments = [];
+    if (replyToMessageId !== undefined && replyToMessageId !== null && String(replyToMessageId).trim() !== '') {
+      const rid = String(replyToMessageId).trim();
+      if (!/^-?[1-9]\d*$/.test(rid)) {
+        throw new OneBotActionError('replyToMessageId 必须是非零整数（消息 id 可能为负数）', {
+          action: kind === 'private' ? 'send_private_msg' : 'send_group_msg',
+          outcome: 'failed'
+        });
+      }
+      segments.push({ type: 'reply', data: { id: rid } });
+    }
+    if (atUserId !== undefined && atUserId !== null && String(atUserId).trim() !== '') {
+      const at = String(atUserId).trim();
+      if (!/^\d+$/.test(at)) {
+        throw new OneBotActionError('atUserId 必须是正整数 QQ 号，且不能为 all', {
+          action: kind === 'private' ? 'send_private_msg' : 'send_group_msg',
+          outcome: 'failed'
+        });
+      }
+      segments.push({ type: 'at', data: { qq: at } });
+    }
+    if (!imageUrl) throw new Error('图片地址为空');
+    segments.push({ type: 'image', data: { file: String(imageUrl) } });
+    return this.sendSegments(kind, id, segments, signal, { timeoutMs: MEDIA_TIMEOUT_MS });
+  }
+
   async sendSticker(kind, id, imageUrl, { replyToMessageId = null, atUserId = null, signal } = {}) {
     const segments = [];
     if (replyToMessageId !== undefined && replyToMessageId !== null && String(replyToMessageId).trim() !== '') {

@@ -357,6 +357,28 @@ export const DEFAULT_CONFIG = {
     skipIfActiveMinutes: 15,    // 刚聊过就别插一句，推迟 20 分钟
     note: ''                    // 留空 = 用内置文案
   },
+  // 素材池与暖场：定期从 B 站捞素材，群里冷场时挑一条开口，私聊分享或单纯搭话。
+  // 与 ownerPing 分开：那个是"到点必做"的问候，这个依赖"有没有素材"。
+  material: {
+    enabled: true,
+    refreshMinMinutes: 60,      // 素材刷新间隔（随机 min~max）
+    refreshMaxMinutes: 90,
+    ttlHours: 12,               // 素材保鲜期：过期就不再当"刚看到"
+    maxItems: 30,               // 池子上限
+    perRun: 3,                  // 每次刷几条
+    quietStart: '23:30',        // 夜间不刷
+    quietEnd: '08:30',
+    keywords: ['游戏', '单机游戏', '电竞'],
+    // ── 群暖场 ──
+    groupWhitelist: [],         // 允许主动开话题的群号；空 = 完全不开
+    groupIdleMinutes: 45,       // 群安静多久才算冷场
+    groupMaxPerDay: 2,          // 每群每天最多开几次
+    groupMinGapHours: 3,        // 两次之间至少隔多久
+    // ── 私聊 ──
+    privateChatEnabled: true,   // 没素材时也允许"无聊找你说话"
+    privateMaxPerDay: 2,
+    privateIdleHours: 3         // 至少多久没聊才允许
+  },
   // 自主节奏（可选）：消息不再即时触发，改由模型按自己安排的节奏醒来统一处理。
   // 默认关闭；开启后建议先观察一段，确认能接受"延迟接话"的节奏。
   pacing: {

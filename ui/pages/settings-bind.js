@@ -281,6 +281,99 @@ function bindOwnerPingEvents() {
   });
 }
 
+// ── 素材与话题（material）：素材池 + 群白名单 + 暖场节奏 ──
+function bindMaterialEvents() {
+  const status = $('#mat-status');
+  const pool = $('#mat-pool');
+  const listBox = $('#mat-whitelist');
+  const listText = $('#mat-whitelist-text');
+  const say = (msg) => { if (status) status.textContent = msg; };
+
+  // 白名单用本地数组维护：服务端只存最终结果，增删都在前端做，保存时整体提交
+  let whitelist = String(listText?.textContent || '')
+    .split('、').map((s) => s.trim()).filter((s) => /^\d+$/.test(s));
+
+  const renderWhitelist = () => {
+    if (listText) listText.textContent = whitelist.length ? whitelist.join('、') : '（空）';
+    if (!listBox) return;
+    listBox.innerHTML = whitelist.map((id) => `
+      <span class="muted" style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;padding:2px 10px">
+        ${esc(id)}
+        <button class="btn btn-small" type="button" data-remove-group="${esc(id)}" style="padding:0 6px;line-height:1.2">×</button>
+      </span>`).join('');
+    listBox.querySelectorAll('[data-remove-group]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        whitelist = whitelist.filter((id) => id !== btn.dataset.removeGroup);
+        renderWhitelist();
+      });
+    });
+  };
+  renderWhitelist();
+
+  const addBtn = $('#mat-add-group-btn');
+  const addInput = $('#cfg-mat-add-group');
+  const addGroup = () => {
+    const id = String(addInput?.value || '').trim().replace(/^group:/, '');
+    if (!/^\d+$/.test(id)) { say('群号只能是数字'); return; }
+    if (!whitelist.includes(id)) whitelist.push(id);
+    if (addInput) addInput.value = '';
+    renderWhitelist();
+  };
+  if (addBtn) addBtn.addEventListener('click', addGroup);
+  if (addInput) addInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addGroup(); } });
+
+  const showPool = async () => {
+    try {
+      const info = await api('/api/material/status');
+      if (pool) {
+        const count = Number(info?.materials) || 0;
+        pool.textContent = count
+          ? `素材池里现在有 ${count} 条；下次自动刷新：${info.nextRefreshAt ? new Date(info.nextRefreshAt).toLocaleString('zh-CN') : '—'}`
+          : '素材池是空的（点「立刻刷一批」，或等她按间隔自动刷）';
+      }
+    } catch { /* 状态拿不到不影响表单 */ }
+  };
+  showPool();
+
+  const save = $('#mat-save-btn');
+  if (save) save.addEventListener('click', async () => {
+    const payload = {
+      enabled: $('#cfg-mat-enabled')?.checked === true,
+      refreshMinMinutes: Number($('#cfg-mat-refresh-min')?.value) || 60,
+      refreshMaxMinutes: Number($('#cfg-mat-refresh-max')?.value) || 90,
+      ttlHours: Number($('#cfg-mat-ttl')?.value) || 12,
+      keywords: String($('#cfg-mat-keywords')?.value || '')
+        .split(/[,，]/).map((s) => s.trim()).filter(Boolean).slice(0, 6),
+      groupWhitelist: whitelist,
+      groupIdleMinutes: Number($('#cfg-mat-idle')?.value) || 45,
+      groupMaxPerDay: Number($('#cfg-mat-maxday')?.value) || 2,
+      groupMinGapHours: Number($('#cfg-mat-gap')?.value) || 3,
+      privateChatEnabled: $('#cfg-mat-private')?.checked === true,
+      privateMaxPerDay: Number($('#cfg-mat-private-max')?.value) || 2,
+      privateIdleHours: Number($('#cfg-mat-private-idle')?.value) || 3
+    };
+    try {
+      await api('/api/material', { method: 'POST', body: JSON.stringify(payload) });
+      say('已保存 ✓');
+      showPool();
+    } catch (error) {
+      say(`保存失败：${error?.message || error}`);
+    }
+  });
+
+  const refresh = $('#mat-refresh-btn');
+  if (refresh) refresh.addEventListener('click', async () => {
+    say('正在刷…');
+    try {
+      const result = await api('/api/material/refresh', { method: 'POST', body: JSON.stringify({ confirm: true }) });
+      say(`刷完了：新增 ${result?.added ?? 0} 条（候选 ${result?.fetched ?? 0} 条）`);
+      showPool();
+    } catch (error) {
+      say(`刷新失败：${error?.message || error}`);
+    }
+  });
+}
+
 function bindSettingsEvents(c) {
   bindSettingsSaveAndSections();
   bindSettingsListsAndGroups(c);
@@ -293,6 +386,7 @@ function bindSettingsEvents(c) {
 function bindSettingsSaveAndSections() {
   if (state.settingsSection === 'time-control') bindTimeControlEvents();
   if (state.settingsSection === 'owner-ping') bindOwnerPingEvents();
+  if (state.settingsSection === 'material') bindMaterialEvents();
   // 保存当前区块设置（通用保存按钮）。只有当前区块的字段才会被读取，不会 null 报错。
   const saveCfgBtn = $('#save-cfg-btn');
   if (saveCfgBtn) saveCfgBtn.addEventListener('click', async () => {

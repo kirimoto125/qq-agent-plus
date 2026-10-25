@@ -121,6 +121,7 @@ import { ZONE_OFFSET_MS, minuteOfDayInZone, randInt, createEventBus, todayKey } 
 import { buildSystemPrompt, buildUserPrompt, isAtMe, resolveContextTier } from '../llm/prompt.js';
 import { chatCompletion, chatCompletionWithRetry, addUsage, emptyUsage, isRetryableError } from '../llm/llm.js';
 import { extractNotebookFacts } from '../memory/notebook-extract.js';
+import { formatTranscript, watchVideo as runWatchVideo, watchCacheGet, watchCacheSet } from '../features/watch-video.js';
 import { buildToolDefs, toOpenAiTools, executeTool, platformToolAllowed } from '../tools/tools.js';
 import { normalizeMid } from '../tools/tools-core.js';
 import { visionEnabled } from '../llm/vision-scan.js';
@@ -436,11 +437,14 @@ export class Orchestrator {
     getPlugins = null,
     // 小本子（按人/按会话的流水记忆）。可选：不传时整块功能停用，
     // 与 memory/stickers 不同，它不影响聊天主流程，所以允许为 null。
-    notebook = null
+    notebook = null,
+    // 素材服务（B 站素材池）：share_topic 工具与暖场调度共用；不传则工具不可用。
+    materials = null
   }) {
     this.store = store;
     this.memory = memory;
     this.notebook = notebook;
+    this.materials = materials;
     this.stickers = stickers;
     this.sender = sender;
     this.sessions = sessions;
@@ -1529,6 +1533,24 @@ export class Orchestrator {
   }
 
   /**
+   * 看视频：下载音频 + 本地转写。结果按 bvid 缓存 7 天，同一条不重复跑。
+   * 这是重活（占满 CPU 一分钟），所以单飞 + 限时；失败原样抛给工具层转成可读错误。
+   */
+  watchVideo(target) {
+    const bvid = String(target || '').match(/BV[0-9A-Za-z]+/)?.[0] || String(target || '').trim();
+    const cached = bvid ? watchCacheGet(bvid) : null;
+    if (cached) return Promise.resolve(cached);
+    return runWatchVideo(target).then((result) => {
+      if (result?.ok && result.bvid) watchCacheSet(result.bvid, result);
+      return result;
+    });
+  }
+
+  watchVideoFormat(result) {
+    return formatTranscript(result);
+  }
+
+  /**
    * 小本子：把这次会话落成一条流水。
    * 与会话交接解耦（交接可以被关掉，小本子照样记账）；用的是已经产出的 handoff 草稿，
    * 不再额外叫一次模型。失败只记日志，绝不影响消息发送与会话收口。
@@ -2167,9 +2189,11 @@ export class Orchestrator {
     const noteStr = String(wakeNote || '');
     const isPingNote = noteStr.startsWith('【定时问候】') || noteStr.startsWith('【定时刷手机】');
     const isBrowseNote = noteStr.startsWith('【定时刷手机】');
+    // 群话题：素材驱动的暖场，和"定时问候"一样要逐字给指令，但开口与否由她判断
+    const isGroupTopic = noteStr.startsWith('【群话题】');
     const wakeLead = wakeNote
-      ? (String(wakeNote).startsWith('【系统提醒】') || isPingNote
-        ? safeSlice(String(wakeNote), 300)
+      ? (String(wakeNote).startsWith('【系统提醒】') || isPingNote || isGroupTopic
+        ? safeSlice(String(wakeNote), 400)
         : `这是你自己之前安排的：${safeSlice(String(wakeNote), 300)}。现在时间到了，看看当前情况决定要不要说话。`)
       : '（主动机会）群里已经安静了一会儿。';
     const selfWakeOn = cfg.proactive?.selfWakeEnabled !== false;
@@ -2190,7 +2214,10 @@ export class Orchestrator {
           + (selfWakeOn
             ? '，并用 schedule_wake 给自己安排下一次醒来的时间（比如几分钟后、或二三十分钟后）。'
             : '。（自安排唤醒已关闭，不用安排下次唤醒，系统会按配置的节奏再唤醒你。）'));
-    const wakeTail = isPingNote
+    const wakeTail = isGroupTopic
+      ? '按上面的判断：值得聊就先说一句自己的话，再用 share_topic 把素材分享出来；'
+        + '不适合这个群就安静结束，别为了暖场硬找话题。'
+      : isPingNote
       ? (isBrowseNote
         ? '按上面的要求：先看再说。有值得说的就用 send_message 说一条（自然点，带上具体见闻）；没有就安静结束，不用安排下一次唤醒。'
         : '按上面的要求：用 send_message 发一条（只发一条，自然点，别像播报）；发完就结束，不用安排下一次唤醒。')
@@ -2232,6 +2259,11 @@ export class Orchestrator {
       store: this.store,
       memory: this.memory,
       notebook: this.notebook,
+      // 素材服务：share_topic 用它按 id/url 取标题、封面、链接
+      materials: this.materials,
+      // 看视频：素材条目或 BV 号 → 本地转写。单飞、限时、结果缓存。
+      watchVideo: (target) => this.watchVideo(target),
+      watchVideoFormat: (result) => this.watchVideoFormat(result),
       identityPilot,
       stickers: this.stickers,
       sender: this.sender,

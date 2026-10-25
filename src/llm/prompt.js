@@ -1100,6 +1100,24 @@ export function buildUserPrompt(ctx) {
     : '';
   if (noteText) parts.push(noteText);
 
+  // 素材本（2026-10-25）：她刷到的、还没过期的内容。只在有素材时才出现，
+  // 每条带 id —— share_topic 要用这个 id 才能把 BV 号和（可选的）封面图一起发出去。
+  const materialNotes = typeof ctx.materials?.list === 'function' ? ctx.materials.list(5) : [];
+  if (materialNotes.length) {
+    const lines = [
+      '【素材本】你最近刷到、还没过期的素材：',
+      '- 想聊其中一条：先说一句你自己的话，然后**必须**用 share_topic 把 BV 号发出来（materialId 用行首的 id）。不调工具只说两句，等于没分享。',
+      '- 封面图发不发由你判断（withImage=true 才发）；BV 号是必须的。',
+      '- 真想知道视频讲了什么，就先 watch_video 看一遍（约 1 分钟），别只看标题瞎猜。'
+    ];
+    for (const note of materialNotes) {
+      const bvid = String(note.topic || '');
+      const url = bvid ? `https://www.bilibili.com/video/${bvid}` : '';
+      lines.push(`- id=${note.id}｜${String(note.body || '').replace(/\s+/g, ' ').slice(0, 120)}${url ? `｜${url}` : ''}`);
+    }
+    parts.push(lines.join('\n'));
+  }
+
   // 成员备注：不再单独成段——备注名已经直接替换了消息里的显示名
   // （formatEntry/triggerLabels 都优先用备注），单独列一遍是重复信息。
 

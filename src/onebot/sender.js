@@ -416,6 +416,42 @@ export class SendQueue {
     });
   }
 
+  /**
+   * 发一张普通图片（独立气泡）。与 sendSticker 的区别：
+   *   - 不写表情库（sticker 是"收藏的表情"，这里是素材封面等临时图片）；
+   *   - 不带 sub_type=1/summary，QQ 就按普通图片渲染，不会变成表情样式。
+   * 与文本/贴纸同款链路：限频、禁言预检、outbox 记账、失败可追溯。
+   */
+  sendImage(chatKey, imageUrl, options = {}) {
+    const [kind, id] = String(chatKey).split(':');
+    const chain = this.#chain(chatKey);
+    return chain(async () => {
+      if (options.runId && this.store.hasUncertainEffects(options.runId)) throw new Error('Previous send delivery is uncertain');
+      this.#checkRate(chatKey);
+      await this.#signalTyping(kind, id, options);
+      await sleep(randInt(400, 900));
+      const data = await this.#deliver(chatKey, options, { type: 'image', url: String(imageUrl) }, () => this.onebot.sendImage(kind, id, imageUrl, {
+        replyToMessageId: options.replyToMessageId ?? null,
+        atUserId: options.atUserId ?? null,
+        signal: options.signal
+      }));
+      const ts = Date.now();
+      let targetUserId = this.#replyTarget(chatKey, options);
+      if (!targetUserId && kind === 'private') targetUserId = String(id);
+      this.#afterSent(() => {
+        this.store.appendSelf(chatKey, {
+          text: '[图片]',
+          ts,
+          mid: data?.message_id ?? null,
+          targetUserId,
+          eventKind: 'message'
+        });
+        this.onSent?.({ chatKey, text: '[图片]', messageId: data?.message_id ?? null });
+      });
+      return { message_id: data?.message_id ?? null };
+    });
+  }
+
   /** 发送一个收藏表情（独立气泡）。 */
   sendSticker(chatKey, sticker, options = {}) {
     const [kind, id] = String(chatKey).split(':');
