@@ -2530,10 +2530,18 @@ export function buildToolDefs() {
         const withImage = args.withImage === true;
         try {
           if (note) {
-            await ctx.sender.sendTextBatch(ctx.chatKey, [note], {
+            const noteResult = await ctx.sender.sendTextBatch(ctx.chatKey, [note], {
               runId: ctx.session?.leaseId,
               signal: ctx.signal,
               preserveCode: true
+            });
+            // 与 send_message 同一口径：把发出的话写进 session.sent，收尾时
+            // #recordNotebookEntry 才拿得到「我说了什么」（2026-10-25 实测：
+            // share_topic 发的内容此前从不记账，导致流水里只剩一句「显卡」，
+            // 模型兜底补记时翻不到本次分享，把旧视频标题串成「我发的那个」）。
+            afterSent(() => {
+              ctx.session?.sent?.push(...(noteResult?.sent || []).map((s) => ({ type: 'text', text: s.text, at: s.at })));
+              ctx.emit?.('session-update', ctx.session?.id);
             });
           }
           if (withImage && material?.cover) {
@@ -2541,6 +2549,10 @@ export function buildToolDefs() {
               await ctx.sender.sendImage(ctx.chatKey, material.cover, {
                 runId: ctx.session?.leaseId,
                 signal: ctx.signal
+              });
+              afterSent(() => {
+                ctx.session?.sent?.push({ type: 'image', text: '[封面图]', at: new Date().toLocaleTimeString('zh-CN', { hour12: false }) });
+                ctx.emit?.('session-update', ctx.session?.id);
               });
             } catch (error) {
               // 封面图发不出去不是致命错误：BV 号照发，别让整次分享失败
@@ -2552,9 +2564,13 @@ export function buildToolDefs() {
           const bvid = String(material.bvid || '').match(/BV[0-9A-Za-z]+/)?.[0] || '';
           if (!bvid) return err('这条素材没有 BV 号，换一条或者直接传 BV 号');
           const tail = [material?.title, bvid].filter(Boolean);
-          await ctx.sender.sendTextBatch(ctx.chatKey, tail, {
+          const tailResult = await ctx.sender.sendTextBatch(ctx.chatKey, tail, {
             runId: ctx.session?.leaseId,
             signal: ctx.signal
+          });
+          afterSent(() => {
+            ctx.session?.sent?.push(...(tailResult?.sent || []).map((s) => ({ type: 'text', text: s.text, at: s.at })));
+            ctx.emit?.('session-update', ctx.session?.id);
           });
           return ok({
             shared: true,
